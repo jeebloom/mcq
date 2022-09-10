@@ -42,7 +42,7 @@ library(gt) # 기술통계 표 깔끔하게
 skim(df) %>% gt()
 ```
 
-## 상관분석 
+## 상관분석
 
 ```{r}
 library(GGally)
