@@ -1,0 +1,60 @@
+---
+title: "MCQ2-탐색분석"
+author: "jihwalee"
+format: html
+editor: visual
+---
+
+## 자료 불러오기
+
+v.rds p.rds 파일 작업 디렉토리에 복사
+
+```{r}
+getwd()
+```
+
+R환경으로 이입
+
+```{r}
+readRDS("v.rds") -> df
+dim(df)
+str(df)
+```
+
+```{r}
+names(df)
+```
+
+## 변수 선택
+
+```{r}
+library(tidyverse)
+library(tidytable)
+df %>% select.(class, starts_with("m_"), humility) -> df
+names(df)
+```
+
+## 기술통계
+
+```{r}
+library(skimr) # 기술통계
+library(gt) # 기술통계 표 깔끔하게 
+skim(df) %>% gt()
+```
+
+## 상관분석 
+
+```{r}
+library(GGally)
+ggpairs(df)
+```
+
+분석할 변수를 계층지각, 5가지 도덕기반, 지적겸손을 선택했다.
+
+8개의 변수의 상관관계를 분석한 결과, 지적겸손은 돌봄(r=0.231, p\<0.001), 공평(r=0.243, p\<0.001), 자유(r=0.152, p\<0.05)와 상관성이 관측됐다. 계층은 자유도덕기반과만 상관성이 관측됐다(r= 0.123, p\<0.001)
+
+계층지각(독립변수-원인) -\> 지적겸손(종속변수-결과)
+
+-   연구가설: 지각된 계층수준이 높을수록 지적으로 겸손할 것이다.
+
+-   분석결과: 계층지각과 지적겸손 사이에는 통계적으로 유의한 상관성이 관측되지 않았다(r=-0.077, p\>.05). 연구가설은 지지되지 않았다.
