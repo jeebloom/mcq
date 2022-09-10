@@ -3,6 +3,9 @@ title: "MCQ2-탐색분석"
 author: "jihwalee"
 format: html
 editor: visual
+toc: true
+number-sections: true
+theme: litera
 ---
 
 # 자료 불러오기
