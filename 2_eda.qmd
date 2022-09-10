@@ -5,7 +5,7 @@ format: html
 editor: visual
 ---
 
-## 자료 불러오기
+# 자료 불러오기
 
 v.rds p.rds 파일 작업 디렉토리에 복사
 
@@ -25,7 +25,7 @@ str(df)
 names(df)
 ```
 
-## 변수 선택
+# 변수 선택
 
 ```{r}
 library(tidyverse)
@@ -34,7 +34,7 @@ df %>% select.(class, starts_with("m_"), humility) -> df
 names(df)
 ```
 
-## 기술통계
+# 기술통계
 
 ```{r}
 library(skimr) # 기술통계
@@ -42,7 +42,7 @@ library(gt) # 기술통계 표 깔끔하게
 skim(df) %>% gt()
 ```
 
-## 상관분석
+# 상관분석
 
 ```{r}
 library(GGally)
