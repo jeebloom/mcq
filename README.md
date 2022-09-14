@@ -1,2 +1,2 @@
 # mcq
-machine assisted content analysis
+2022.2학기 미디어커뮤니케이션품질연구2 
