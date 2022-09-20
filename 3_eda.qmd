@@ -1,5 +1,5 @@
 ---
-title: "MCQ2-2W"
+title: "MCQ3-탐색분석-20220920"
 author: "AD202211602 이지화"
 format: html
 editor: visual
@@ -8,69 +8,485 @@ number-sections: true
 theme: litera
 ---
 
-# 자료 불러오기
+# 이대남: 언론사 + 감정분석 + 도덕기반
 
-v.rds p.rds 파일 작업 디렉토리에 복사
+### 자료위치 확인
 
 ```{r}
 getwd()
 ```
 
-R환경으로 이입
+### 패키지 불러오기
 
 ```{r}
-readRDS("v.rds") -> df
-dim(df)
-str(df)
+c(
+  "feather", "rio", "textdata", "text2vec",  # import data 
+  "tidyverse", "tidytable", "tidytext", "lubridate", # cleaning data
+  "psych", "skimr", "janitor", "broom", # data analysis
+  "gt", "GGally"  # communicate data
+) -> pkg
+
+sapply(pkg, function(x) {
+  if(!require(x, ch = T)) install.packages(x, dependencies = T) 
+  library(x, ch = T)
+})
 ```
+
+### MAC 호환 설정
 
 ```{r}
-names(df)
+# (mac os 에서만 실행) ggplot 한글 호환
+par(family="NanumGothic")
+theme_set(theme_gray(base_family="NanumGothic"))
+
+# (mac os 에서만 실행) 상관관계 그래프 한글 호환 
+library(showtext)
+showtext_auto()
+theme(text = element_text(family = "NanumGotic"))
 ```
 
-# 변수 선택
+### 감정사전 / 도덕사전 불러오기
+
+사용할 수 있게 만들어 놓기
 
 ```{r}
-library(tidyverse)
-library(tidytable)
-df %>% select.(progress, vaccine_norm, covid_risk, q_chosun, q_joong, q_hani, q_khan) -> df
-names(df)
+### 미리 저장한 한국어감정사전 불러오기 
+read_feather("dic_kor.feather") -> dic_kor_df
+
+### 미리 저장한 한국어 도덕기반 사전 불러오기 
+read_feather("dic_kmfd.feather") -> kmfd_df
 ```
 
-# 기술통계
+### 도덕 사전 5개 기반으로 구성하기
 
 ```{r}
-library(skimr) # 기술통계
-library(gt) # 기술통계 표 깔끔하게 
-skim(df)
-skim(df) %>% gt()
+kmfd_df %>% 
+  mutate(sScore = recode(sScore,
+                         `2` = "1",
+                         `4` = "3",
+                         `6` = "5",
+                         `8` = "7",
+                         `10` = "9")) %>% 
+  mutate(sScore = as.numeric(sScore)) -> kmfd5_df
+
+glimpse(kmfd5_df) #구조 확인해보기 
+
+kmfd5_df %>% tabyl(sScore) # 빈도 확인해보기 
 ```
 
-# 상관분석
+### 도덕기반사전 각 5개로 분리 후 값 다 1로 바꾸기
 
 ```{r}
-library(GGally)
-ggpairs(df)
+kmfd5_df %>% 
+  filter(sScore == 1)%>% 
+  mutate(sScore = ifelse(sScore == 1, 1)) -> kmf_care
+
+kmfd5_df %>% 
+  filter(sScore == 3) %>% 
+  mutate(sScore = ifelse(sScore == 3, 1)) -> kmf_fair
+
+kmfd5_df %>% 
+  filter(sScore == 5) %>% 
+  mutate(sScore = ifelse(sScore == 5, 1)) -> kmf_loyal
+
+kmfd5_df %>% 
+  filter(sScore == 7) %>% 
+  mutate(sScore = ifelse(sScore == 7, 1)) -> kmf_autho
+
+kmfd5_df %>% 
+  filter(sScore == 9) %>% 
+  mutate(sScore = ifelse(sScore == 9, 1)) -> kmf_sanct
 ```
 
-# 가설 및 결과
+## 
 
-분석할 변수로 1. 주관적 진보성향(progress) 2. 주관적 백신규범(vaccine_norm) 3. 코로나 위험지각(covid_risk), 4. 주관적 뉴스품질평가(뉴스품질지각, q\_)를 선택했다. (뉴스품질지각은 조선, 중앙(보수지), 한겨레, 경향(진보지)만 포함) 
+## 감정분석+ 도덕기반 분석
 
-## 가설
+-   자료수집 빅카인즈의 '뉴스분석' 메뉴에서 '뉴스검색·분석'을 선택한 다음, '상세검색'을 클릭한다. 상세검색은 다양한 기준으로 검색할 수 있다. 검색유형 기본값은 '뉴스,' 검색어처리 기본값은 '형태소분석,' 검색어범위 기본값은 '제목+본문'이다. 모두 기본값으로 검색한다.
 
--   가설 1: 주관적 진보성향이 높을수록(보수적) 주관적 백신규범 수준이 높을 것이다. 
+<!-- -->
 
--   가설 2: 코로나 위험지각 수준이 높을수록 주관적 백신규범 수준이 높을 것이다. 
+-   기간: 2019-01-01 \~ 2022-06-15
 
--   가설 3: 주관적 진보성향이 높은 사람(보수적)은 보수지(조선, 중앙)의 뉴스품질을 높게 평가하고 진보지(한겨레, 경향)의 뉴스품질을 낮게 평가할 것이다.
+-   검색어: 이대남, 이대녀
 
-## 결과
+-   언론사: 경향신문, 동아일보, 조선일보, 중앙일보, 한겨레
 
--   가설 1 결과: 주관적 진보성향과 주관적 백신규범 사이에는 통계적으로 유의한 상관성이 관측되지 않았다*(r = -0.120, p\>0.5)*. 가설1은 지지되지 않았다. 
+-   통합분류: 정치, 경제, 사회, 국제, 지역, IT_과학
 
--   가설 2 결과: 코로나 위험지각과 주관적 백신규범 사이에는 통계적으로 유의한 상관성이 관측되었다*(r=0.542, p\<0.001)*. 가설2는 지지되었다.
+-   분석: 분석기사 (분석기사를 선택하면 중복(반복되는 유사도 높은 기사)과 예외(인사 부고 동정 포토)가 검색에서 제외된다.
 
--   가설 3 결과: 주관적 진보성향과 주관적 뉴스품질평가 사이에서는 주관적 진보성향과 조선일보 평가*(r=0.334, p\<0.001)*, 중앙일보*(r=0.227, p\<0.001)*, 한겨례*(r=-0.165, p\<0.01)*사이에서 통계적으로 유의한 상관성이 관측되었다. 경향신문*(r=-0.010, p\>0.5)*은 통계적으로 유의한 상관성이 관측되지 않았다. 즉, 주관적 진보성향이 높을수록(보수적일수록) 조선일보와 중앙일보의 품질을 높게 평가하며 한겨레는 낮게 평가한다고 해석할 수 있다. 
+### 기사불러오기
 
-\-\--
+```{r}
+import("NewsResult_20190101-20220615.xlsx") -> news_df
+
+glimpse(news_df)# 구조 확인
+
+news_df %>% select(일자, 제목, 본문, 언론사, cat = `통합 분류1`, 키워드) -> news_df
+news_df %>% str() # 구조 확인하자
+news_df %>% head(50) -> news_df # 500개만 뽑아서 해보장 
+
+```
+
+### 데이터 정리
+
+```{r}
+news_df %>% 
+  # 중복기사 제거
+  distinct(제목, .keep_all = T) %>% 
+  # 기사 아이디 있지만 새롭게 범주 만들어 주는 것 행 번호 row_number 
+  mutate(ID = factor(row_number())) %>% 
+  # 몇주에 나온거야 
+  mutate(week = week(ymd(일자))) %>% 
+  #기사제목 + 본문 / 본문 그냥 확인해보려고
+  unite.(제목, 본문, col = "text", sep = " ") %>% 
+  # 중복공백 제거
+  mutate(text = str_squish(text)) %>% 
+  # 언론사 정치성향별 구분 / 언론사 구분이니 press 로 카테고리 묶어줘 
+  mutate(press = case_when.(
+    언론사 == "조선일보" ~ "조중동",
+    언론사 == "중앙일보" ~ "조중동",
+    언론사 == "동아일보" ~ "조중동",
+    언론사 == "경향신문" ~ "경한",
+    TRUE ~ "경한")) %>% 
+  # 분리가 > 로 되어있으니 분리하고 
+  separate(cat, sep = ">", into = c("cat", "cat2")) %>% 
+  # -cat2는 빼는 거 
+  select(-cat2) %>% 
+  mutate(catSoc = case_when.(
+    cat == "사회" ~ "사회면",
+    cat == "지역" ~ "사회면",
+    cat == "경제" ~ "경제면",
+    cat == "국제" ~ "국제면", 
+    cat == "정치" ~ "정치면", 
+    cat == "문화" ~ "문화면",
+    TRUE ~ "기타"
+  )) -> news_df
+
+news_df %>% glimpse() # 구조확인
+
+news_df$catSoc # 새로만든 카테고리 확인
+```
+
+### 감정분석 함수 만들기
+
+```{r}
+pn_f <- function(token, dic) {
+  count_df <- token %>%
+    left_join.(dic) %>%  # 사전 결합
+    mutate(sScore = case_when.(
+      sScore >= 1 ~ "positive",
+      sScore <= -1 ~ "negative",
+      TRUE ~ "neutral"
+    )) %>%
+    tabyl(sScore) %>% adorn_totals() %>%   # 합계 비율 계산
+    mutate(np = ifelse(
+      sScore == "Total", n * percent, percent)) %>% 
+    select.(sScore, np) %>% 
+    pivot_wider.(names_from = sScore, values_from = np)
+  return(count_df)
+}
+
+add_f <- function(xx) {
+  if (ncol(xx) == 4) {
+    xx
+  } else if (ncol(xx) == 3) {
+    if (prod(names(xx) != "negative")) { #negative가 없을 경우, bind_cols 행추가 
+      xx %>% bind_cols.(data.table(negative = 0))
+    } else if (prod(names(xx) != "positive")) {
+      xx %>% bind_cols.(data.table(positive = 0))
+    } else if (prod(names(xx) != "neutral")) {
+      xx %>% bind_cols.(data.table(neutral = 0))
+    }
+  }  else if (ncol(xx) == 2) {
+    if (sum(names(xx) == "negative")) {
+      xx %>% bind_cols.(data.table(positive = 0, neutral = 0))
+    } else if (sum(names(xx) == "positive")) {
+      xx %>% bind_cols.(data.table(negative = 0, neutral = 0))
+    } else if (sum(names(xx) == "neutral")) {
+      xx %>% bind_cols.(data.table(negative = 0, positive = 0))
+    }
+  }
+}
+```
+
+### 만든함수로 하는 조건문
+
+```{r}
+# 만든 함수로 하는 조건문 
+
+txt_df <- news_df
+dic <- dic_kor_df
+
+output <- data.frame()
+for(i in 1:nrow(txt_df)){
+  output %>% bind_rows(
+    txt_df[i, ] %>% unnest_tokens(word, 키워드) %>% 
+      pn_f(dic) %>% add_f()  
+  ) -> output
+}
+
+output -> pnko_df # 감정분석
+```
+
+### 도덕기반 함수 만들기
+
+```{r}
+kmfd_f <- function(token, dic) {
+  count_df <- token %>%
+    left_join.(dic) %>%  # 사전 결합
+    mutate(sScore = case_when.(
+      sScore >= 1 ~ "good", # 값 있는 경우
+      TRUE ~ "neutral"
+    )) %>%
+    tabyl(sScore) %>% adorn_totals() %>%   # 합계 비율 계산
+    mutate(np = ifelse(
+      sScore == "Total", n * percent, percent)) %>% 
+    select.(sScore, np) %>% 
+    pivot_wider.(names_from = sScore, values_from = np)
+  return(count_df)
+}
+
+
+kmfd_add_f <- function(xx) {
+  if (ncol(xx) == 3) {
+    xx
+  } else if (ncol(xx) == 2) {
+    if (prod(names(xx) != "good")) { # good 이 없을 경우, bind_cols 행추가 
+      xx %>% bind_cols.(data.table(good = 0))
+    } else if (prod(names(xx) != "neutral")) {
+      xx %>% bind_cols.(data.table(neutral = 0))
+    }
+  }
+}
+
+```
+
+### 도덕기반사전 조건문
+
+```{r}
+#####CARE
+
+txt_df <- news_df
+dic <- kmf_care
+
+output <- data.frame()
+for(i in 1:nrow(txt_df)){
+  output %>% bind_rows(
+    txt_df[i, ] %>% unnest_tokens(word, 키워드) %>% 
+      kmfd_f(dic) %>% kmfd_add_f()  
+  ) -> output
+}
+
+output %>%
+  rename(care = good,
+         care_neu = neutral,
+         care_Total = Total) -> care_df
+
+
+######FAIR
+
+txt_df <- news_df
+dic <- kmf_fair
+
+output <- data.frame()
+for(i in 1:nrow(txt_df)){
+  output %>% bind_rows(
+    txt_df[i, ] %>% unnest_tokens(word, 키워드) %>% 
+      kmfd_f(dic) %>% kmfd_add_f()  
+  ) -> output
+}
+
+output %>%
+  rename(fair = good,
+         fair_neu = neutral,
+         fair_Total = Total) -> fair_df
+
+
+##########LOYAL
+
+txt_df <- news_df
+dic <- kmf_loyal
+
+output <- data.frame()
+for(i in 1:nrow(txt_df)){
+  output %>% bind_rows(
+    txt_df[i, ] %>% unnest_tokens(word, 키워드) %>% 
+      kmfd_f(dic) %>% kmfd_add_f()  
+  ) -> output
+}
+
+output %>% 
+  rename(loyal = good,
+         loyal_neu = neutral,
+         loyal_Total = Total) -> loyal_df
+
+
+######AUTHORITY
+
+txt_df <- news_df
+dic <- kmf_autho
+
+output <- data.frame()
+for(i in 1:nrow(txt_df)){
+  output %>% bind_rows(
+    txt_df[i, ] %>% unnest_tokens(word, 키워드) %>% 
+      kmfd_f(dic) %>% kmfd_add_f()  
+  ) -> output
+}
+
+output %>%
+  rename(autho = good,
+         autho_neu = neutral,
+         autho_Total = Total) -> autho_df
+
+
+######SANCTITY
+
+txt_df <- news_df
+dic <- kmf_sanct
+
+output <- data.frame()
+for(i in 1:nrow(txt_df)){
+  output %>% bind_rows(
+    txt_df[i, ] %>% unnest_tokens(word, 키워드) %>% 
+      kmfd_f(dic) %>% kmfd_add_f()  
+  ) -> output
+}
+
+output %>%
+  rename(sanct = good,
+         sanct_neu = neutral,
+         sanct_Total = Total) -> sanct_df
+```
+
+### 도덕기반 전체 합치기
+
+```{r}
+bind_cols.(care_df, fair_df, loyal_df, autho_df, sanct_df) -> ko_mfd_df
+
+ko_mfd_df
+```
+
+### 도덕기반 + 감정 합치기
+
+```{r}
+news_df %>% bind_cols.(pnko_df) %>% bind_cols.(ko_mfd_df) -> pnko_mfd_df
+```
+
+### 완성된 데이터프레임들
+
+```{r}
+news_df
+pnko_df 
+care_df
+fair_df
+loyal_df
+autho_df
+sanct_df
+ko_mfd_df # 도덕기반 전체 
+pnko_mdf_df # 감정+도덕기반 전체
+```
+
+### 개별 데이터프레임 감정 \_+ 도덕 합치기
+
+```{r}
+news_df %>% bind_cols(pnko_df) %>% bind_cols(care_df) -> pnko_care_df # 감정분석 + care 합한거
+news_df %>% bind_cols(pnko_df) %>% bind_cols(fair_df) -> pnko_fair_df
+news_df %>% bind_cols(pnko_df) %>% bind_cols(loyal_df) -> pnko_loyal_df
+news_df %>% bind_cols(pnko_df) %>% bind_cols(autho_df) -> pnko_autho_df
+news_df %>% bind_cols(pnko_df) %>% bind_cols(sanct_df) -> pnko_sanct_df
+```
+
+### 상관관계
+
+```{r}
+
+# press (조중, 경한 2개), 언론사 (조선, 중앙, 경향, 한겨레 4개)
+
+pnko_mfd_df %>% select(언론사, positive, negative, care, fair, loyal, autho, sanct) %>% 
+  ggpairs(legend = 1, aes(color = 언론사, alpha = 0.5), 
+          upper = list(continuous = wrap("cor", size = 3))) +
+  theme(legend.position = "bottom") + ggtitle("PN / MFD")
+
+pnko_mfd_df %>% select(press, positive, negative, care, fair, loyal, autho, sanct) %>% 
+  ggpairs(legend = 1, aes(color = press, alpha = 0.5), 
+          upper = list(continuous = wrap("cor", size = 3))) +
+  theme(legend.position = "bottom") + ggtitle("PN / MFD")
+
+pnko_mfd_df %>% select(press, care, fair, loyal, autho, sanct) %>% 
+  ggpairs(legend = 1, aes(color = press, alpha = 0.5), 
+          upper = list(continuous = wrap("cor", size = 3))) +
+  theme(legend.position = "bottom") + ggtitle("MFD")
+
+pnko_mfd_df %>% select(press, positive, negative) %>% 
+  ggpairs(legend = 1, aes(color = press, alpha = 0.5), 
+          upper = list(continuous = wrap("cor", size = 3))) +
+  theme(legend.position = "bottom") + ggtitle("PN")
+
+pnko_mfd_df
+
+### 상관관계 
+
+# Care
+
+pnko_care_df %>% select(언론사, positive, negative, care) %>% 
+  ggpairs(legend = 1, aes(color = 언론사, alpha = 0.5), 
+          upper = list(continuous = wrap("cor", size = 3))) +
+  theme(legend.position = "bottom") + ggtitle("care")
+
+pnko_care_df %>% select(press, positive, negative, care) %>% 
+  ggpairs(legend = 1, aes(color = press, alpha = 0.5), 
+          upper = list(continuous = wrap("cor", size = 3))) +
+  theme(legend.position = "bottom") + ggtitle("care")
+
+# fair
+
+pnko_fair_df %>% select(언론사, positive, negative, fair) %>% 
+  ggpairs(legend = 1, aes(color = 언론사, alpha = 0.5), 
+          upper = list(continuous = wrap("cor", size = 3))) +
+  theme(legend.position = "bottom") + ggtitle("fair")
+
+pnko_fair_df %>% select(press, positive, negative, fair) %>% 
+  ggpairs(legend = 1, aes(color = press, alpha = 0.5), 
+          upper = list(continuous = wrap("cor", size = 3))) +
+  theme(legend.position = "bottom") + ggtitle("fair")
+
+# loyal
+
+pnko_loyal_df %>% select(언론사, positive, negative, loyal) %>% 
+  ggpairs(legend = 1, aes(color = 언론사, alpha = 0.5), 
+          upper = list(continuous = wrap("cor", size = 3))) +
+  theme(legend.position = "bottom") + ggtitle("loyal")
+
+pnko_loyal_df %>% select(press, positive, negative, loyal) %>% 
+  ggpairs(legend = 1, aes(color = press, alpha = 0.5), 
+          upper = list(continuous = wrap("cor", size = 3))) +
+  theme(legend.position = "bottom") + ggtitle("loyal")
+
+# autho
+
+pnko_autho_df %>% select(언론사, positive, negative, autho) %>% 
+  ggpairs(legend = 1, aes(color = 언론사, alpha = 0.5), 
+          upper = list(continuous = wrap("cor", size = 3))) +
+  theme(legend.position = "bottom") + ggtitle("authority")
+
+pnko_autho_df %>% select(press, positive, negative, autho) %>% 
+  ggpairs(legend = 1, aes(color = press, alpha = 0.5), 
+          upper = list(continuous = wrap("cor", size = 3))) +
+  theme(legend.position = "bottom") + ggtitle("authority")
+
+
+# sanct
+
+pnko_sanct_df %>% select(언론사, positive, negative, sanct) %>% 
+  ggpairs(legend = 1, aes(color = 언론사, alpha = 0.5), 
+          upper = list(continuous = wrap("cor", size = 3))) +
+  theme(legend.position = "bottom") + ggtitle("sanctity")
+
+pnko_sanct_df %>% select(press, positive, negative, sanct) %>% 
+  ggpairs(legend = 1, aes(color = press, alpha = 0.5), 
+          upper = list(continuous = wrap("cor", size = 3))) +
+  theme(legend.position = "bottom") + ggtitle("sanctity")
+```
