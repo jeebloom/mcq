@@ -1,0 +1,132 @@
+---
+title: "4w_mcq"
+author: "AD202211602 이지화"
+format: html
+editor: visual
+toc: true
+number-sections: true
+theme: litera
+---
+
+# 세팅하기
+
+## 자료위치 확인
+
+```{r}
+getwd()
+```
+
+## 패키지 업로드
+
+```{r}
+c(
+  "feather", "rio", "textdata", "text2vec",  # import data 
+  "tidyverse", "tidytable", "tidytext", "lubridate", # cleaning data
+  "psych", "skimr", "janitor", "broom", # data analysis
+  "gt", "GGally"  # communicate data
+) -> pkg
+
+sapply(pkg, function(x) {
+  if(!require(x, ch = T)) install.packages(x, dependencies = T) 
+  library(x, ch = T)
+})
+```
+
+## 맥북 세팅
+
+```{r}
+# (mac os 에서만 실행) ggplot 한글 호환
+par(family="NanumGothic")
+theme_set(theme_gray(base_family= "NanumGothic"))
+
+# (mac os 에서만 실행) 상관관계 그래프 한글 호환 
+library(showtext)
+font_add("NanumGothic", "NanumGothic.ttf")
+showtext_auto()
+theme(text = element_text(family = "NanumGothic"))
+```
+
+# 자료 불러오기
+
+v.rds / p.rds 파일 작업 디렉토리에 복사 후 R 환경으로 이입
+
+```{r}
+readRDS("v.rds") -> df
+df %>% dim
+```
+
+구조 확인하기
+
+```{r}
+df %>% str()
+```
+
+변수 이름 확인하기
+
+```{r}
+df %>% names()
+```
+
+# 변수선택
+
+```{r}
+# tidyverse, tidytable
+
+df %>% select.(gen, sex, progress, h_openness, q_chosun, q_joong, q_hani, q_khan) -> df
+
+df %>% names()
+```
+
+# 기술통계
+
+```{r}
+# skimr(기술통계) , gt(표 깔끔)
+
+df %>% skim()
+
+skim(df) %>% gt()
+```
+
+# 상관분석
+
+```{r}
+
+# GGally
+
+df %>% ggpairs()
+```
+
+# 회귀분석
+
+```{r}
+# p.value 지수로 출력된 것 숫자로 바꾸기
+options(scipen=999)
+
+df %>% lm(q_chosun ~ progress + h_openness , .) %>% tidy()
+```
+
+```{r}
+df %>% lm(q_joong ~ progress + h_openness , .) %>% tidy()
+```
+
+```{r}
+df %>% lm(q_hani ~ progress + h_openness , .) %>% tidy()
+```
+
+```{r}
+df %>% lm(q_khan ~ progress + h_openness, .) %>% tidy()
+```
+
+# 가설 및 결과
+
+분석할 변수로 1.성별 2.주관적 진보성향(progress) 3. 개방성(h_openness) 4. 주관적뉴스품질평가(뉴스품질 지각, q\_)를 선택했다. 뉴스품질지각은 조선, 중앙(보수지), 한겨레, 경향(진보지)만 포함하였다.
+
+## 가설
+
+-   가설 1: 주관적 진보성향이 높은 사람(보수적)은 보수지(조선, 중앙)의 뉴스품질을 높게 평가하고 진보지(한겨레, 경향)의 뉴스품질을 낮게 평가할 것이다.
+
+-   가설 2:
+
+## 결과
+
+-   가설 3 결과: 주관적 진보성향과 주관적 뉴스품질평가 사이에서는 주관적 진보성향과 조선일보 평가(r=0.334, p\<0.001), 중앙일보(r=0.227, p\<0.001), 한겨례(r=-0.165, p\<0.01)사이에서 통계적으로 유의한 상관성이 관측되었다. 경향신문(r=-0.010, p\>0.5)은 통계적으로 유의한 상관성이 관측되지 않았다. 즉, 주관적 진보성향이 높을수록(보수적일수록) 조선일보와 중앙일보의 품질을 높게 평가하며 한겨레는 낮게 평가한다고 해석할 수 있다.
