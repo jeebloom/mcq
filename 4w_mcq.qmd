@@ -463,301 +463,45 @@ options(scipen = 999)
 ```
 
 ```{r}
-pnko_mfd_df %>% lm(care ~ press + positive + negative, .) %>% tidy()
-```
-
-```{r}
-pnko_mfd_df %>% lm(autho ~ press + positive + negative, .) %>% tidy()
-```
-
-```{r}
-pnko_mfd_df %>% lm(fair ~ press + positive + negative, .) %>% tidy()
-```
-
-```{r}
-pnko_mfd_df %>% lm(loyal ~ press + positive + negative, .) %>% tidy()
-```
-
-```{r}
-pnko_mfd_df%>% lm(sanct ~ press + positive + negative, .) %>% tidy()
-```
-
-```{r}
-pnko_mfd_df%>% lm(sanct ~ press, .) %>% tidy()
-```
-
-```{r}
-pnko_autho_df %>% names()
-pnko_autho_df %>% select(press, negative, positive, autho) -> df
-df %>% names()
-```
-
-```{r}
-pnko_mfd_df %>% glimpse()
+# press는 범주형변수이기 때문에, 속성을 숫자형으로 변환
 pnko_mfd_df %>% mutate(press1 = recode(press, 
                                        조중 = 1,
-                                       경한 = 2)) -> pnko_mfd_df
+                                       경한 = 2))
 ```
 
 ```{r}
-pnko_mfd_df %>% names()
-
-pnko_mfd_df %>% select(press1, negative, positive, care) -> df
-
-df %>% names()
+pnko_mfd_df %>% lm(care ~ press1, .) %>% tidy()
 ```
 
 ```{r}
-y <- 4
-x1 <- 1 
-x2 <- 2
-x3 <- 3# vigor ~ dose
-xx <- c(1, 2, 3) # vigor ~ dose + sex
-nn <- length(xx) + 1
-
+pnko_mfd_df %>% lm(care ~ press1 + positive + negative, .) %>% tidy()
 ```
 
 ```{r}
-### 회귀모형 2개 생성
-mod_two <- function(df, y, x1, xx) {
-## 변수 및 회귀모형
-  # 변수
-  dv <- names(df)[y]
-  iv1 <- names(df)[x1]
-  iv2 <- names(df)[xx]
-  # 모형1 회귀식
-  fml_mdl1 <- iv1 %>%
-    paste0(., collapse = " + ") %>%
-    paste0(dv, " ~ ", .)
-  # 모형2 회귀식
-  fml_mdl2 <- iv2 %>%
-    paste0(., collapse = " + ") %>%
-    paste0(dv, " ~ ", .)
-## 회귀분석 + 데이터프레임결합
-  model <- c(fml_mdl1, fml_mdl2)
-  return(model)
-}
-mod_two(df, y, x1, xx) -> model
-data.frame(Formulas = model) %>% gt()
+pnko_mfd_df %>% lm(fair ~ press1, .) %>% tidy()
 ```
 
 ```{r}
-### 회귀분석 사용자함수
-reg_f <- function(nn, model){  
-  # 표의 행 개수: 모형2 변수 + 절편행 개수
-  output <- list()
-  for (i in seq_along(model)) {
-    fit <- df %>% lm(model[i], .)
-    # 변수명, 회귀계수, 표준오차 데이터프레임
-    op <- tidy(fit)[1:nn, 1:3] %>% 
-      # 표준화 회귀계수 데이터프레임
-      bind_cols.(tidy(lm.beta(fit))[1:nn, 2]) %>%
-      # 결정계수 데이터프레임
-      bind_rows.(data.frame(
-        term = c("결정계수",
-                 "수정결정계수"),
-        estimate...2 = NA,
-        std.error = c(summary(fit)$r.squared,
-                         summary(fit)$adj.r.squared),
-        estimate...4 = NA
-      ))
-    output <- list(output, op)
-  }
-  return(output)
-}
-reg_f(nn, model) -> fit
-fit
+pnko_mfd_df %>% lm(fair ~ press1 + positive + negative, .) %>% tidy()
 ```
 
 ```{r}
-### 모형 2개 결합해 표로 정리
-tbl_two <- function(df, fit){
-  fit[[1]][[2]] %>%
-    bind_cols.(fit[[2]]) %>%
-    select.(term = term...5, # 모형2 변수명
-            estimate...2:estimate...8) %>%
-    gt() %>%
-    tab_header(str_glue("{names(df)[y]}에 대한 회귀분석결과")) %>%
-    fmt_number(-1, decimals = 2) %>%
-    sub_missing(-1, missing_text = html("<br>")) %>%
-    cols_label(
-      term = md("IV"),
-      estimate...2 = md("_B_"),
-      std.error...3 = md("_SE_"),
-      estimate...4 = html("&beta;"),
-      estimate...6 = md("_B_"),
-      std.error...7 = md("_SE_"),
-      estimate...8 = html("&beta;"),
-    ) %>%
-    tab_spanner(
-      label = "Model 1",
-      columns = estimate...2:estimate...4) %>%
-    tab_spanner(
-      label = "Model 2",
-      columns = estimate...6:estimate...8) %>%
-    text_transform(
-      locations = 
-        cells_body(
-          columns = term,
-          rows = term == "결정계수"),
-         fn = function(x) {html(
-          "<p align='center'><em>R<sup>2</sup></em></p>")        }) %>% 
-    text_transform(
-      locations = 
-        cells_body(
-          columns = term,
-          rows = term == "수정결정계수"),
-      fn = function(x) {html(
-          "<p align='center'><em>R<sup>2</sup><sub>adj</sub></em></p>")
-        }) %>% 
-    tab_footnote(
-      footnote = str_glue("N = {nrow(df)}"),
-      locations = cells_title()
-    )
-}
-tbl_two(df, fit)
-```
-
-```{r}
-names(df)
-
-y <- 4
-x1 <- 1        # 친사회성 ~ 이야기  
-x2 <- 2
-x3 <- 3
-xx <- c(x1,x2) # 친사회성 ~ 이야기 + 장르  
-               # 친사회성 ~ 이야기 * 장르
-### 회귀분석결과 표 생성 사용자함수
-moderation_f <- function(df, y, x1, xx) {
-## 변수 및 회귀모형
-  # 변수
-  dv <- names(df)[y]
-  iv1 <- names(df)[x1]
-  iv2 <- names(df)[xx]
-  # 모형1 회귀식
-  fml_mdl1 <- iv1 %>%
-    paste0(., collapse = " + ") %>%
-    paste0(dv, " ~ ", .)
-  # 모형2 회귀식
-  fml_mdl2 <- iv2 %>%
-    paste0(., collapse = " + ") %>%
-    paste0(dv, " ~ ", .)
-  # 모형3 회귀식
-  fml_mdl3 <- iv2 %>%
-    paste0(., collapse = " * ") %>%
-    paste0(dv, " ~ ", .)
-## 회귀분석 + 데이터프레임결합
-  model <- c(fml_mdl1, fml_mdl2, fml_mdl3)
-  return(model)
-} 
-moderation_f(df, y, x1, xx) -> model
-data.frame(Formulas = model) %>% gt()
-```
-
-```{r}
-```
-
-```{r}
-### 회귀모형 3종 생성
-mod_three <- function(df, y, x1, x2, xx) {
-## 변수 및 회귀모형
-  # 변수
-  dv <- names(df)[y]
-  iv1 <- names(df)[x1]
-  iv2 <- names(df)[x2]
-  iv3 <- names(df)[xx]
-  # 모형1 회귀식
-  fml_mdl1 <- iv1 %>%
-    paste0(., collapse = " + ") %>%
-    paste0(dv, " ~ ", .)
-  # 모형2 회귀식
-  fml_mdl2 <- iv2 %>%
-    paste0(., collapse = " + ") %>%
-    paste0(dv, " ~ ", .)
-  # 모형3 회귀식
-  fml_mdl3 <- iv3 %>%
-    paste0(., collapse = " + ") %>%
-    paste0(dv, " ~ ", .)
-## 회귀분석 + 데이터프레임결합
-  model <- c(fml_mdl1, fml_mdl2, fml_mdl3)
-  return(model)
-}
-mod_three(df, y, x1, x2, xx) -> model
-data.frame(Fomulas = model) %>% gt()
-```
-
-```{r}
+pnko_mfd_df %>% lm(loyal ~ press1 + positive + negative, .) %>% tidy()
 
 ```
 
 ```{r}
-
+pnko_mfd_df %>% lm(autho ~ press1, .) %>% tidy()
 ```
 
 ```{r}
-## 모형3개 결합해 표로 정리
-tbl_three <- function(df, fit){
-  fit[[1]][[2]][[3]] %>%
-    bind_cols.(fit[[1]][[2]]) %>%
-    bind_cols.(fit[[2]]) %>%
-    select.(term = term...9, # 모형3 변수명
-            estimate...2:p.value...4, 
-            estimate...6:p.value...8,
-            estimate...10:p.value...12
-            ) %>%
-    gt() %>%
-    tab_header(str_glue("{names(df)[y]}에 대한 회귀분석결과")) %>%
-    fmt_number(-1, decimals = 2) %>%
-    fmt_number(starts_with("p.value"), decimals = 3) %>%
-    sub_missing(-1, missing_text = html("<br>")) %>%
-    cols_label(
-      term = md("IV"),
-      estimate...2 = md("_B_"),
-      std.error...3 = md("_SE_"),
-      p.value...4 = md("_p_"),
-      estimate...6 = md("_B_"),
-      std.error...7 = md("_SE_"),
-      p.value...8 = md("_p_"),
-      estimate...10 = md("_B_"),
-      std.error...11 = md("_SE_"),
-      p.value...12 = md("_p_")
-    ) %>%
-    tab_spanner(
-      label = str_glue("Model 1"),
-      columns = estimate...2:p.value...4) %>%
-    tab_spanner(
-      label = str_glue("Model 2"),
-      columns = estimate...6:p.value...8) %>%
-    tab_spanner(
-      label = str_glue("Model 3"),
-      columns = estimate...10:p.value...12) %>%
-    text_transform(
-      locations = 
-        cells_body(
-          columns = term,
-          rows = term == "결정계수"),
-      fn = function(x) {html(
-          "<p align='center'><em>R<sup>2</sup></em></p>")
-        }) %>% 
-    text_transform(
-      locations = 
-        cells_body(
-          columns = term,
-          rows = term == "수정결정계수"),
-      fn = function(x) {html(
-          "<p align='center'><em>R<sup>2</sup><sub>adj</sub></em></p>")
-        }) %>% 
-    tab_footnote(
-      footnote = str_glue("N = {nrow(df)}"),
-      locations = cells_title()
-    )
-}
-tbl_three(df, fit)
+pnko_mfd_df %>% lm(autho ~ press1 + press1:negative + press1:positive, .) %>% tidy()
 ```
 
 ```{r}
-nn <- length(xx) + 1 + 1  # IV행 + 절편행 + 상호작용항행 개수
-model %>% 
-  reg_f(nn, .) %>% 
-  tbl_three(df, .)
+pnko_mfd_df %>% lm(sanct ~ press1, .) %>% tidy()
+```
+
+```{r}
+pnko_mfd_df%>% lm(sanct ~ press1 * (positive + negative), .) %>% tidy()
 ```
