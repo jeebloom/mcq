@@ -1,6 +1,7 @@
 ---
-title: "4W-TEXTMINING"
+title: "4W_mcq_textmining"
 author: "AD202211602 이지화"
+date: "2022/09/27"
 format: html
 editor: visual
 ---
@@ -11,7 +12,7 @@ editor: visual
 c(
   "feather", "rio", "textdata", "text2vec",  # import data 
   "tidyverse", "tidytable", "tidytext", "lubridate", # cleaning data
-  "psych", "skimr", "janitor", "broom", "tidylo" # data analysis
+  "psych", "skimr", "janitor", "broom", "tidylo", # data analysis
   "gt", "GGally"  # communicate data
 ) -> pkg
 
@@ -225,9 +226,9 @@ meta <- out$meta
 
 ```
 
-# 분석 
+# 분석
 
-## 주제의 수 (K) 설정 (연습) 
+## 주제의 수 (K) 설정 (연습)
 
 -   주제를 몇개로 설정할지 탐색, searchk() 함수는 주제의 수에 따라 4가지 계수 제공함
 
@@ -241,9 +242,8 @@ meta <- out$meta
 
     -   *배타성, 의미 일관성, 지속성이 높을 수록, 그리고 잔차가 작을수록 모형의 적절성 증가.*
 
-```{=html}
 <!-- -->
-```
+
 -   보통 10개부터 100개까지 10개 단위로 주제의 수를 구분헤 최종 주제수 판단함. 여기에서는 계산수를 줄이기 위해 주제의 수를 5개와 10개의 결과만 비교하고자 함.
 
 ```{r}
@@ -417,7 +417,7 @@ gamma_terms %>%
   theme(plot.title = element_text(size = 20))
 ```
 
-### (참고) 주제 이름 목록 
+### (참고) 주제 이름 목록
 
 주제별 주요 단어 labelTopics() 함수로 주요 단어 찾기
 

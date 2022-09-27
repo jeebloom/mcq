@@ -1,0 +1,810 @@
+---
+title: "MCQ"
+author: "AD202211602 이지화"
+format: html
+editor: visual
+toc: true
+number-sections: true
+theme: litera
+---
+
+
+# 이대남: 언론사 + 감정분석 + 도덕기반
+
+### 자료위치 확인
+
+
+```{r}
+getwd()
+```
+
+
+### 패키지 불러오기
+
+
+```{r}
+c(
+  "feather", "rio", "textdata", "text2vec",  # import data 
+  "tidyverse", "tidytable", "tidytext", "lubridate", # cleaning data
+  "psych", "skimr", "janitor", "broom", # data analysis
+  "gt", "GGally"  # communicate data
+) -> pkg
+
+sapply(pkg, function(x) {
+  if(!require(x, ch = T)) install.packages(x, dependencies = T) 
+  library(x, ch = T)
+})
+```
+
+
+### MAC 호환 설정
+
+
+```{r}
+library(extrafont)
+font_import()
+theme_set(theme_gray(base_family= "sans"))
+
+
+```
+
+```{r}
+# (mac os 에서만 실행) ggplot 한글 호환
+par(family="NanumGothic")
+theme_set(theme_gray(base_family= "NanumGothic"))
+
+# (mac os 에서만 실행) 상관관계 그래프 한글 호환 
+library(showtext)
+font_add("NanumGothic", "NanumGothic.ttf")
+showtext_auto()
+theme(text = element_text(family = "NanumGothic"))
+```
+
+
+### 감정사전 / 도덕사전 불러오기
+
+사용할 수 있게 만들어 놓기
+
+
+```{r}
+### 미리 저장한 한국어감정사전 불러오기 
+read_feather("dic_kor.feather") -> dic_kor_df
+
+### 미리 저장한 한국어 도덕기반 사전 불러오기 
+read_feather("dic_kmfd.feather") -> kmfd_df
+```
+
+
+### 도덕 사전 5개 기반으로 구성하기
+
+
+```{r}
+kmfd_df %>% 
+  mutate(sScore = recode(sScore,
+                         `2` = "1",
+                         `4` = "3",
+                         `6` = "5",
+                         `8` = "7",
+                         `10` = "9")) %>% 
+  mutate(sScore = as.numeric(sScore)) -> kmfd5_df
+
+glimpse(kmfd5_df) #구조 확인해보기 
+
+kmfd5_df %>% tabyl(sScore) # 빈도 확인해보기 
+```
+
+
+### 도덕기반사전 각 5개로 분리 후 값 다 1로 바꾸기
+
+
+```{r}
+kmfd5_df %>% 
+  filter(sScore == 1)%>% 
+  mutate(sScore = ifelse(sScore == 1, 1)) -> kmf_care
+
+kmfd5_df %>% 
+  filter(sScore == 3) %>% 
+  mutate(sScore = ifelse(sScore == 3, 1)) -> kmf_fair
+
+kmfd5_df %>% 
+  filter(sScore == 5) %>% 
+  mutate(sScore = ifelse(sScore == 5, 1)) -> kmf_loyal
+
+kmfd5_df %>% 
+  filter(sScore == 7) %>% 
+  mutate(sScore = ifelse(sScore == 7, 1)) -> kmf_autho
+
+kmfd5_df %>% 
+  filter(sScore == 9) %>% 
+  mutate(sScore = ifelse(sScore == 9, 1)) -> kmf_sanct
+```
+
+
+## 
+
+## 감정분석+ 도덕기반 분석
+
+-   자료수집 빅카인즈의 '뉴스분석' 메뉴에서 '뉴스검색·분석'을 선택한 다음, '상세검색'을 클릭한다. 상세검색은 다양한 기준으로 검색할 수 있다. 검색유형 기본값은 '뉴스,' 검색어처리 기본값은 '형태소분석,' 검색어범위 기본값은 '제목+본문'이다. 모두 기본값으로 검색한다.
+-   기간: 2019-01-01 \~ 2022-09-23
+-   검색어: 이대남
+-   언론사: 경향신문, 조선일보, 중앙일보, 한겨레
+-   통합분류: 정치, 경제, 사회, 국제, 지역
+-   분석: 분석기사 (분석기사를 선택하면 중복(반복되는 유사도 높은 기사)과 예외(인사 부고 동정 포토)가 검색에서 제외된다.
+
+### 기사불러오기
+
+
+```{r}
+import("news_20190101_20220923_M.xlsx") -> news_M_df
+
+glimpse(news_M_df)# 구조 확인
+
+news_M_df %>% select(일자, 언론사, 제목, 본문, cat = `통합 분류1`, 키워드) -> news_M_df
+news_M_df %>% glimpse() # 구조 확인하자
+
+```
+
+
+### 데이터 정리
+
+
+```{r}
+news_M_df %>% 
+  # 중복기사 제거
+  distinct(제목, .keep_all = T) %>% 
+  # 기사 아이디 있지만 새롭게 범주 만들어 주는 것 행 번호 row_number 
+  mutate(ID = factor(row_number())) %>% 
+  # 몇주에 나온거야 
+  mutate(week = week(ymd(일자))) %>% 
+  #기사제목 + 본문 / 본문 그냥 확인해보려고
+  unite.(제목, 본문, col = "text", sep = " ") %>% 
+  # 중복공백 제거
+  mutate(text = str_squish(text)) %>% 
+  # 언론사 정치성향별 구분 / 언론사 구분이니 press 로 카테고리 묶어줘 
+  mutate(press = case_when.(
+    언론사 == "조선일보" ~ "조중",
+    언론사 == "중앙일보" ~ "조중",
+    언론사 == "경향신문" ~ "경한",
+    TRUE ~ "경한")) %>% 
+  # 분리가 > 로 되어있으니 분리하고 
+  separate(cat, sep = ">", into = c("cat", "cat2")) %>% 
+  # -cat2는 빼는 거 
+  select(-cat2) %>% 
+  mutate(catSoc = case_when.(
+    cat == "사회" ~ "사회면",
+    cat == "지역" ~ "사회면",
+    cat == "경제" ~ "경제면",
+    cat == "국제" ~ "국제면", 
+    cat == "정치" ~ "정치면", 
+    cat == "문화" ~ "문화면",
+    TRUE ~ "기타"
+  )) -> news_M_df
+
+news_M_df %>% glimpse() # 구조확인
+
+news_M_df$catSoc # 새로만든 카테고리 확인
+```
+
+
+### 감정분석 함수 만들기
+
+
+```{r}
+pn_f <- function(token, dic) {
+  count_df <- token %>%
+    left_join.(dic) %>%  # 사전 결합
+    mutate(sScore = case_when.(
+      sScore >= 1 ~ "positive",
+      sScore <= -1 ~ "negative",
+      TRUE ~ "neutral"
+    )) %>%
+    tabyl(sScore) %>% adorn_totals() %>%   # 합계 비율 계산
+    mutate(np = ifelse(
+      sScore == "Total", n * percent, percent)) %>% 
+    select.(sScore, np) %>% 
+    pivot_wider.(names_from = sScore, values_from = np)
+  return(count_df)
+}
+
+add_f <- function(xx) {
+  if (ncol(xx) == 4) {
+    xx
+  } else if (ncol(xx) == 3) {
+    if (prod(names(xx) != "negative")) { #negative가 없을 경우, bind_cols 행추가 
+      xx %>% bind_cols.(data.table(negative = 0))
+    } else if (prod(names(xx) != "positive")) {
+      xx %>% bind_cols.(data.table(positive = 0))
+    } else if (prod(names(xx) != "neutral")) {
+      xx %>% bind_cols.(data.table(neutral = 0))
+    }
+  }  else if (ncol(xx) == 2) {
+    if (sum(names(xx) == "negative")) {
+      xx %>% bind_cols.(data.table(positive = 0, neutral = 0))
+    } else if (sum(names(xx) == "positive")) {
+      xx %>% bind_cols.(data.table(negative = 0, neutral = 0))
+    } else if (sum(names(xx) == "neutral")) {
+      xx %>% bind_cols.(data.table(negative = 0, positive = 0))
+    }
+  }
+}
+```
+
+
+### 만든함수로 하는 조건문
+
+
+```{r}
+# 만든 함수로 하는 조건문 
+
+txt_df <- news_M_df
+dic <- dic_kor_df
+
+output <- data.frame()
+for(i in 1:nrow(txt_df)){
+  output %>% bind_rows(
+    txt_df[i, ] %>% unnest_tokens(word, 키워드) %>% 
+      pn_f(dic) %>% add_f()  
+  ) -> output
+}
+
+output -> pnko_df # 감정분석
+```
+
+
+### 도덕기반 함수 만들기
+
+
+```{r}
+kmfd_f <- function(token, dic) {
+  count_df <- token %>%
+    left_join.(dic) %>%  # 사전 결합
+    mutate(sScore = case_when.(
+      sScore >= 1 ~ "good", # 값 있는 경우
+      TRUE ~ "neutral"
+    )) %>%
+    tabyl(sScore) %>% adorn_totals() %>%   # 합계 비율 계산
+    mutate(np = ifelse(
+      sScore == "Total", n * percent, percent)) %>% 
+    select.(sScore, np) %>% 
+    pivot_wider.(names_from = sScore, values_from = np)
+  return(count_df)
+}
+
+
+kmfd_add_f <- function(xx) {
+  if (ncol(xx) == 3) {
+    xx
+  } else if (ncol(xx) == 2) {
+    if (prod(names(xx) != "good")) { # good 이 없을 경우, bind_cols 행추가 
+      xx %>% bind_cols.(data.table(good = 0))
+    } else if (prod(names(xx) != "neutral")) {
+      xx %>% bind_cols.(data.table(neutral = 0))
+    }
+  }
+}
+
+```
+
+
+### 도덕기반사전 조건문
+
+
+```{r}
+#####CARE
+
+txt_df <- news_M_df
+dic <- kmf_care
+
+output <- data.frame()
+for(i in 1:nrow(txt_df)){
+  output %>% bind_rows(
+    txt_df[i, ] %>% unnest_tokens(word, 키워드) %>% 
+      kmfd_f(dic) %>% kmfd_add_f()  
+  ) -> output
+}
+
+output %>%
+  rename(care = good,
+         care_neu = neutral,
+         care_Total = Total) -> care_df
+
+
+######FAIR
+
+txt_df <- news_M_df
+dic <- kmf_fair
+
+output <- data.frame()
+for(i in 1:nrow(txt_df)){
+  output %>% bind_rows(
+    txt_df[i, ] %>% unnest_tokens(word, 키워드) %>% 
+      kmfd_f(dic) %>% kmfd_add_f()  
+  ) -> output
+}
+
+output %>%
+  rename(fair = good,
+         fair_neu = neutral,
+         fair_Total = Total) -> fair_df
+
+
+##########LOYAL
+
+txt_df <- news_M_df
+dic <- kmf_loyal
+
+output <- data.frame()
+for(i in 1:nrow(txt_df)){
+  output %>% bind_rows(
+    txt_df[i, ] %>% unnest_tokens(word, 키워드) %>% 
+      kmfd_f(dic) %>% kmfd_add_f()  
+  ) -> output
+}
+
+output %>% 
+  rename(loyal = good,
+         loyal_neu = neutral,
+         loyal_Total = Total) -> loyal_df
+
+
+######AUTHORITY
+
+txt_df <- news_M_df
+dic <- kmf_autho
+
+output <- data.frame()
+for(i in 1:nrow(txt_df)){
+  output %>% bind_rows(
+    txt_df[i, ] %>% unnest_tokens(word, 키워드) %>% 
+      kmfd_f(dic) %>% kmfd_add_f()  
+  ) -> output
+}
+
+output %>%
+  rename(autho = good,
+         autho_neu = neutral,
+         autho_Total = Total) -> autho_df
+
+
+######SANCTITY
+
+txt_df <- news_M_df
+dic <- kmf_sanct
+
+output <- data.frame()
+for(i in 1:nrow(txt_df)){
+  output %>% bind_rows(
+    txt_df[i, ] %>% unnest_tokens(word, 키워드) %>% 
+      kmfd_f(dic) %>% kmfd_add_f()  
+  ) -> output
+}
+
+output %>%
+  rename(sanct = good,
+         sanct_neu = neutral,
+         sanct_Total = Total) -> sanct_df
+```
+
+
+### 도덕기반 전체 합치기
+
+
+```{r}
+bind_cols.(care_df, fair_df, loyal_df, autho_df, sanct_df) -> ko_mfd_df
+
+ko_mfd_df %>% str()
+```
+
+
+### 도덕기반 + 감정 합치기
+
+
+```{r}
+news_M_df %>% bind_cols.(pnko_df) %>% bind_cols.(ko_mfd_df) -> pnko_mfd_df
+
+pnko_mfd_df %>% glimpse()
+```
+
+
+### 완성된 데이터프레임들
+
+
+```{r}
+news_M_df
+pnko_df 
+care_df
+fair_df
+loyal_df
+autho_df
+sanct_df
+ko_mfd_df # 도덕기반 전체 
+pnko_mfd_df # 감정+도덕기반 전체
+```
+
+
+### 개별 데이터프레임 감정 + 도덕 합치기
+
+
+```{r}
+news_M_df %>% bind_cols(pnko_df) %>% bind_cols(care_df) -> pnko_care_df # 감정분석 + care 합한거
+news_M_df %>% bind_cols(pnko_df) %>% bind_cols(fair_df) -> pnko_fair_df
+news_M_df %>% bind_cols(pnko_df) %>% bind_cols(loyal_df) -> pnko_loyal_df
+news_M_df %>% bind_cols(pnko_df) %>% bind_cols(autho_df) -> pnko_autho_df
+news_M_df %>% bind_cols(pnko_df) %>% bind_cols(sanct_df) -> pnko_sanct_df
+```
+
+
+### 감정+도덕 합친 데이터프레임
+
+
+```{r}
+pnko_mfd_df %>% glimpse()
+```
+
+
+### 상관관계
+
+
+```{r}
+pnko_mfd_df %>% select(press, positive, negative, care, fair, loyal, autho, sanct) %>% 
+  ggpairs(legend = 1, aes(color = press, alpha = 0.5), 
+          upper = list(continuous = wrap("cor", size = 3))) +
+  theme(legend.position = "bottom") + ggtitle("PN / MFD")
+```
+
+```{r}
+pnko_mfd_df %>% select(press, positive, negative) %>% 
+  ggpairs(legend = 1, aes(color = press, alpha = 0.5), 
+          upper = list(continuous = wrap("cor", size = 3))) +
+  theme(legend.position = "bottom") + ggtitle("PN")
+```
+
+```{r}
+pnko_mfd_df %>% select(press, positive, negative, care) %>% 
+  ggpairs(legend = 1, aes(color = press, alpha = 0.5), 
+          upper = list(continuous = wrap("cor", size = 3))) +
+  theme(legend.position = "bottom") + ggtitle("care")
+```
+
+```{r}
+# fair
+pnko_mfd_df %>% select(press, positive, negative, fair) %>% 
+  ggpairs(legend = 1, aes(color = press, alpha = 0.5), 
+          upper = list(continuous = wrap("cor", size = 3))) +
+  theme(legend.position = "bottom") + ggtitle("fair")
+```
+
+```{r}
+# loyal
+pnko_mfd_df %>% select(press, positive, negative, loyal) %>% 
+  ggpairs(legend = 1, aes(color = press, alpha = 0.5), 
+          upper = list(continuous = wrap("cor", size = 3))) +
+  theme(legend.position = "bottom") + ggtitle("loyal")
+
+```
+
+```{r}
+# autho
+pnko_mfd_df %>% select(press, positive, negative, autho) %>% 
+  ggpairs(legend = 1, aes(color = press, alpha = 0.5), 
+          upper = list(continuous = wrap("cor", size = 3))) +
+  theme(legend.position = "bottom") + ggtitle("authority")
+```
+
+```{r}
+# sanct
+pnko_mfd_df %>% select(press, positive, negative, sanct) %>% 
+  ggpairs(legend = 1, aes(color = press, alpha = 0.5), 
+          upper = list(continuous = wrap("cor", size = 3))) +
+  theme(legend.position = "bottom") + ggtitle("sanctity")
+```
+
+
+### 회귀분석
+
+
+```{r}
+# p.value 지수로 출력된 것 숫자로 바꾸기
+options(scipen = 999)
+```
+
+```{r}
+pnko_mfd_df %>% lm(care ~ press + positive + negative, .) %>% tidy()
+```
+
+```{r}
+pnko_mfd_df %>% lm(autho ~ press + positive + negative, .) %>% tidy()
+```
+
+```{r}
+pnko_mfd_df %>% lm(fair ~ press + positive + negative, .) %>% tidy()
+```
+
+```{r}
+pnko_mfd_df %>% lm(loyal ~ press + positive + negative, .) %>% tidy()
+```
+
+```{r}
+pnko_mfd_df%>% lm(sanct ~ press + positive + negative, .) %>% tidy()
+```
+
+```{r}
+pnko_mfd_df%>% lm(sanct ~ press, .) %>% tidy()
+```
+
+```{r}
+pnko_autho_df %>% names()
+pnko_autho_df %>% select(press, negative, positive, autho) -> df
+df %>% names()
+```
+
+```{r}
+pnko_mfd_df %>% glimpse()
+pnko_mfd_df %>% mutate(press1 = recode(press, 
+                                       조중 = 1,
+                                       경한 = 2)) -> pnko_mfd_df
+```
+
+```{r}
+pnko_mfd_df %>% names()
+
+pnko_mfd_df %>% select(press1, negative, positive, care) -> df
+
+df %>% names()
+```
+
+```{r}
+y <- 4
+x1 <- 1 
+x2 <- 2
+x3 <- 3# vigor ~ dose
+xx <- c(1, 2, 3) # vigor ~ dose + sex
+nn <- length(xx) + 1
+
+```
+
+```{r}
+### 회귀모형 2개 생성
+mod_two <- function(df, y, x1, xx) {
+## 변수 및 회귀모형
+  # 변수
+  dv <- names(df)[y]
+  iv1 <- names(df)[x1]
+  iv2 <- names(df)[xx]
+  # 모형1 회귀식
+  fml_mdl1 <- iv1 %>%
+    paste0(., collapse = " + ") %>%
+    paste0(dv, " ~ ", .)
+  # 모형2 회귀식
+  fml_mdl2 <- iv2 %>%
+    paste0(., collapse = " + ") %>%
+    paste0(dv, " ~ ", .)
+## 회귀분석 + 데이터프레임결합
+  model <- c(fml_mdl1, fml_mdl2)
+  return(model)
+}
+mod_two(df, y, x1, xx) -> model
+data.frame(Formulas = model) %>% gt()
+```
+
+```{r}
+### 회귀분석 사용자함수
+reg_f <- function(nn, model){  
+  # 표의 행 개수: 모형2 변수 + 절편행 개수
+  output <- list()
+  for (i in seq_along(model)) {
+    fit <- df %>% lm(model[i], .)
+    # 변수명, 회귀계수, 표준오차 데이터프레임
+    op <- tidy(fit)[1:nn, 1:3] %>% 
+      # 표준화 회귀계수 데이터프레임
+      bind_cols.(tidy(lm.beta(fit))[1:nn, 2]) %>%
+      # 결정계수 데이터프레임
+      bind_rows.(data.frame(
+        term = c("결정계수",
+                 "수정결정계수"),
+        estimate...2 = NA,
+        std.error = c(summary(fit)$r.squared,
+                         summary(fit)$adj.r.squared),
+        estimate...4 = NA
+      ))
+    output <- list(output, op)
+  }
+  return(output)
+}
+reg_f(nn, model) -> fit
+fit
+```
+
+```{r}
+### 모형 2개 결합해 표로 정리
+tbl_two <- function(df, fit){
+  fit[[1]][[2]] %>%
+    bind_cols.(fit[[2]]) %>%
+    select.(term = term...5, # 모형2 변수명
+            estimate...2:estimate...8) %>%
+    gt() %>%
+    tab_header(str_glue("{names(df)[y]}에 대한 회귀분석결과")) %>%
+    fmt_number(-1, decimals = 2) %>%
+    sub_missing(-1, missing_text = html("<br>")) %>%
+    cols_label(
+      term = md("IV"),
+      estimate...2 = md("_B_"),
+      std.error...3 = md("_SE_"),
+      estimate...4 = html("&beta;"),
+      estimate...6 = md("_B_"),
+      std.error...7 = md("_SE_"),
+      estimate...8 = html("&beta;"),
+    ) %>%
+    tab_spanner(
+      label = "Model 1",
+      columns = estimate...2:estimate...4) %>%
+    tab_spanner(
+      label = "Model 2",
+      columns = estimate...6:estimate...8) %>%
+    text_transform(
+      locations = 
+        cells_body(
+          columns = term,
+          rows = term == "결정계수"),
+         fn = function(x) {html(
+          "<p align='center'><em>R<sup>2</sup></em></p>")        }) %>% 
+    text_transform(
+      locations = 
+        cells_body(
+          columns = term,
+          rows = term == "수정결정계수"),
+      fn = function(x) {html(
+          "<p align='center'><em>R<sup>2</sup><sub>adj</sub></em></p>")
+        }) %>% 
+    tab_footnote(
+      footnote = str_glue("N = {nrow(df)}"),
+      locations = cells_title()
+    )
+}
+tbl_two(df, fit)
+```
+
+```{r}
+names(df)
+
+y <- 4
+x1 <- 1        # 친사회성 ~ 이야기  
+x2 <- 2
+x3 <- 3
+xx <- c(x1,x2) # 친사회성 ~ 이야기 + 장르  
+               # 친사회성 ~ 이야기 * 장르
+### 회귀분석결과 표 생성 사용자함수
+moderation_f <- function(df, y, x1, xx) {
+## 변수 및 회귀모형
+  # 변수
+  dv <- names(df)[y]
+  iv1 <- names(df)[x1]
+  iv2 <- names(df)[xx]
+  # 모형1 회귀식
+  fml_mdl1 <- iv1 %>%
+    paste0(., collapse = " + ") %>%
+    paste0(dv, " ~ ", .)
+  # 모형2 회귀식
+  fml_mdl2 <- iv2 %>%
+    paste0(., collapse = " + ") %>%
+    paste0(dv, " ~ ", .)
+  # 모형3 회귀식
+  fml_mdl3 <- iv2 %>%
+    paste0(., collapse = " * ") %>%
+    paste0(dv, " ~ ", .)
+## 회귀분석 + 데이터프레임결합
+  model <- c(fml_mdl1, fml_mdl2, fml_mdl3)
+  return(model)
+} 
+moderation_f(df, y, x1, xx) -> model
+data.frame(Formulas = model) %>% gt()
+```
+
+```{r}
+```
+
+```{r}
+### 회귀모형 3종 생성
+mod_three <- function(df, y, x1, x2, xx) {
+## 변수 및 회귀모형
+  # 변수
+  dv <- names(df)[y]
+  iv1 <- names(df)[x1]
+  iv2 <- names(df)[x2]
+  iv3 <- names(df)[xx]
+  # 모형1 회귀식
+  fml_mdl1 <- iv1 %>%
+    paste0(., collapse = " + ") %>%
+    paste0(dv, " ~ ", .)
+  # 모형2 회귀식
+  fml_mdl2 <- iv2 %>%
+    paste0(., collapse = " + ") %>%
+    paste0(dv, " ~ ", .)
+  # 모형3 회귀식
+  fml_mdl3 <- iv3 %>%
+    paste0(., collapse = " + ") %>%
+    paste0(dv, " ~ ", .)
+## 회귀분석 + 데이터프레임결합
+  model <- c(fml_mdl1, fml_mdl2, fml_mdl3)
+  return(model)
+}
+mod_three(df, y, x1, x2, xx) -> model
+data.frame(Fomulas = model) %>% gt()
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+## 모형3개 결합해 표로 정리
+tbl_three <- function(df, fit){
+  fit[[1]][[2]][[3]] %>%
+    bind_cols.(fit[[1]][[2]]) %>%
+    bind_cols.(fit[[2]]) %>%
+    select.(term = term...9, # 모형3 변수명
+            estimate...2:p.value...4, 
+            estimate...6:p.value...8,
+            estimate...10:p.value...12
+            ) %>%
+    gt() %>%
+    tab_header(str_glue("{names(df)[y]}에 대한 회귀분석결과")) %>%
+    fmt_number(-1, decimals = 2) %>%
+    fmt_number(starts_with("p.value"), decimals = 3) %>%
+    sub_missing(-1, missing_text = html("<br>")) %>%
+    cols_label(
+      term = md("IV"),
+      estimate...2 = md("_B_"),
+      std.error...3 = md("_SE_"),
+      p.value...4 = md("_p_"),
+      estimate...6 = md("_B_"),
+      std.error...7 = md("_SE_"),
+      p.value...8 = md("_p_"),
+      estimate...10 = md("_B_"),
+      std.error...11 = md("_SE_"),
+      p.value...12 = md("_p_")
+    ) %>%
+    tab_spanner(
+      label = str_glue("Model 1"),
+      columns = estimate...2:p.value...4) %>%
+    tab_spanner(
+      label = str_glue("Model 2"),
+      columns = estimate...6:p.value...8) %>%
+    tab_spanner(
+      label = str_glue("Model 3"),
+      columns = estimate...10:p.value...12) %>%
+    text_transform(
+      locations = 
+        cells_body(
+          columns = term,
+          rows = term == "결정계수"),
+      fn = function(x) {html(
+          "<p align='center'><em>R<sup>2</sup></em></p>")
+        }) %>% 
+    text_transform(
+      locations = 
+        cells_body(
+          columns = term,
+          rows = term == "수정결정계수"),
+      fn = function(x) {html(
+          "<p align='center'><em>R<sup>2</sup><sub>adj</sub></em></p>")
+        }) %>% 
+    tab_footnote(
+      footnote = str_glue("N = {nrow(df)}"),
+      locations = cells_title()
+    )
+}
+tbl_three(df, fit)
+```
+
+```{r}
+nn <- length(xx) + 1 + 1  # IV행 + 절편행 + 상호작용항행 개수
+model %>% 
+  reg_f(nn, .) %>% 
+  tbl_three(df, .)
+```
+
