@@ -1,0 +1,421 @@
+---
+title: "4W_mcq_textmining"
+author: "AD202211602 이지화"
+date: "2022/09/27"
+format: html
+editor: visual
+---
+
+# 패키지 불러오기
+
+```{r}
+c(
+  "feather", "rio", "textdata", "text2vec",  # import data 
+  "tidyverse", "tidytable", "tidytext", "lubridate", # cleaning data
+  "psych", "skimr", "janitor", "broom", "tidylo", # data analysis
+  "gt", "GGally"  # communicate data
+) -> pkg
+
+sapply(pkg, function(x) {
+  if(!require(x, ch = T)) install.packages(x, dependencies = T) 
+  library(x, ch = T)
+})
+
+```
+
+# 맥북 호환 설정
+
+```{r}
+# (mac os 에서만 실행) ggplot 한글 호환
+par(family="NanumGothic")
+theme_set(theme_gray(base_family= "NanumGothic"))
+
+# (mac os 에서만 실행) 상관관계 그래프 한글 호환 
+library(showtext)
+font_add("NanumGothic", "NanumGothic.ttf")
+showtext_auto()
+theme(text = element_text(family = "NanumGothic"))
+
+```
+
+# 분석 준비
+
+## 자료 준비
+
+```{r}
+
+import("news_20190101_20220923_M.xlsx") -> df
+```
+
+```{r}
+df %>% names()
+
+df %>% select(일자, 제목, 본문, 언론사, 키워드) -> df
+
+```
+
+일자 월에 대한 값으로 변경하기
+
+```{r}
+library(lubridate)
+```
+
+```{r}
+as_date("20201231") %>% month()
+ymd("20201231") %>% month()
+```
+
+```{r}
+df2 <- 
+  df %>% 
+  # 중복기사 제거
+  distinct(제목, .keep_all = T) %>% 
+  # 기사별 ID부여
+  mutate(ID = factor(row_number())) %>% 
+  # 월별로 구분한 열 추가(lubridate 패키지)
+  mutate(month = month(ymd(일자))) %>%       
+  # 기사 제목과 본문 결합
+  unite(제목, 본문, col = "text", sep = " ") %>% 
+  # 중복 공백 제거
+  mutate(text = str_squish(text)) %>% 
+  # 언론사 구분: 보수, 진보 %>% 
+  mutate(press = case_when(
+    언론사 == "조선일보" ~ "보수지",
+    언론사 == "중앙일보" ~ "보수지",
+    언론사 == "경향신문" ~ "진보지",
+    TRUE ~ "진보지") )
+```
+
+```{r}
+df2 %>% tail(10)
+```
+
+```{r}
+df2 %>% names()
+```
+
+기사 분류된 월 등 새로 생성한 열의 내용 확인해보기
+
+```{r}
+df2$month %>% unique()
+```
+
+분류별, 월별 기사 양 계산
+
+```{r}
+df2 %>% count(month, sort =T)
+```
+
+```{r}
+df2 %>% count(언론사, sort = T)
+```
+
+토큰화, 불용어 제거 등
+
+```{r}
+"!@#$... 전각ㆍㅣ문자 %^&*()" %>% str_remove("\\w+")
+
+fullchar_v <- "ㆍ|ㅣ|‘|’|“|”|○|●|◎|◇|◆|□|■|△|▲|▽|▼|〓|◁|◀|▷|▶|♤|♠|♡|♥|♧|♣|⊙|◈|▣"
+
+df_tk <- 
+  df2 %>% 
+  mutate(키워드 = str_remove_all(키워드, "[^(\\w+|\\d+|,)]")) %>% 
+  mutate(키워드 = str_remove_all(키워드, fullchar_v)) %>% 
+  unnest_tokens(word, 키워드, token = "regex", pattern = ",") 
+```
+
+'이대남'으로 검색했기 때문에, '이대남'은 제거
+
+```{r}
+df_tk <-
+  df_tk %>% 
+  filter(!word %in% c("이대남"))
+```
+
+단어의 총 빈도와 상대빈도 살펴보기
+
+```{r}
+df_tk %>% count(word, sort = T)
+```
+
+상대빈도가 높은 단어와 낮은 단어 확인
+
+```{r}
+df_tk %>% count(press, word, sort = T) %>% 
+  bind_log_odds(set = press, feature = word, n = n) %>% 
+  arrange(log_odds_weighted)
+```
+
+```{r}
+df_tk %>% count(press, word, sort = T) %>% 
+  bind_tf_idf(term = word, document = word, n = n) %>% 
+  arrange(idf)
+```
+
+```{r}
+library(stm)
+```
+
+stm 패키지 형식의 말뭉치로 변환하기, 분리된 토큰을 원래 문장 에 속한 하나의 열로 저장하기
+
+```{r}
+combined_df <-
+  df_tk %>%
+  group_by(ID) %>%
+  summarise(text2 = str_flatten(word, " ")) %>%
+  ungroup() %>% 
+  inner_join(df2, by = "ID")
+```
+
+```{r}
+combined_df %>% glimpse()
+```
+
+textProcessort() 함수로 리스트 형식의 stm 말뭉치 변환하기
+
+```{r}
+processed <- df2 %>% textProcessor(
+  documents = combined_df$text2, 
+  metadata = NULL,
+  lowercase = TRUE,
+  removestopwords = TRUE,
+  removenumbers = TRUE,
+  removepunctuation = TRUE,
+  ucp = FALSE,
+  stem = TRUE)
+
+```
+
+주제모형에 사용할 데이터 인덱스(wordcounts) 만들기
+
+```{r}
+out <- 
+  prepDocuments(processed$documents,
+                     processed$vocab,
+                     processed$meta)
+```
+
+제거할 수 있는 단어와 문서의 수 확인
+
+```{r}
+plotRemoved(processed$documents, lower.thresh = seq(0, 100, by = 5))
+
+```
+
+최소값 설정해 빈도가 낮아 제거할 용어의 수 설정하기
+
+```{r}
+out <-
+  prepDocuments(processed$documents,
+                processed$vocab,
+                processed$meta, 
+                lower.thresh = 2)
+```
+
+산출 결과 개별 객체로 저장하기
+
+```{r}
+docs <- out$documents
+vocab <- out$vocab
+meta <- out$meta
+
+```
+
+# 분석
+
+## 주제의 수 (K) 설정 (연습)
+
+-   주제를 몇개로 설정할지 탐색, searchk() 함수는 주제의 수에 따라 4가지 계수 제공함
+
+    -   배타성(exclusivity): 특정 주제에 등장한 단어가 다른 주제에는 나오지 않는 정도. 확산타당도에 해당.
+
+    -   의미 일관성(semantic coherence): 특정 주제에 높은 확률로 나타나는 단어가 동시에 등장하는 정도. 수렴타당도에 해당.
+
+    -   지속성(heldout likelihood): 데이터 일부가 존재하지 않을 때의 모형 예측 지속 정도.
+
+    -   잔차(residual): 투입한 데이터로 모형을 설명하지 못하는 오차.
+
+    -   *배타성, 의미 일관성, 지속성이 높을 수록, 그리고 잔차가 작을수록 모형의 적절성 증가.*
+
+<!-- -->
+
+-   보통 10개부터 100개까지 10개 단위로 주제의 수를 구분헤 최종 주제수 판단함. 여기에서는 계산수를 줄이기 위해 주제의 수를 5개와 10개의 결과만 비교하고자 함.
+
+```{r}
+# topicN <- seq(from = 10, to = 100, by = 10)
+topicN <- c(5, 10)
+
+storage <- searchK(out$documents, out$vocab, K = topicN)
+```
+
+```{r}
+plot(storage) # 배타성, 지속성, 잔차 등 3개 지표에서 모두 주제의 수가 10개인 모형이 우수함. 
+```
+
+## 주제모형 구성
+
+```{r}
+stm_fit <-
+  stm(
+    documents = docs,
+    vocab = vocab,
+    K = 10,    # 토픽의 수
+    data = meta,
+    init.type = "Spectral",
+    seed = 37 # 반복실행해도 같은 결과가 나오게 난수 고정
+  )
+```
+
+```{r}
+summary(stm_fit) %>% glimpse()
+```
+
+```{r}
+summary(stm_fit)
+```
+
+*참고* (`stm`패키지는 4종의 가중치를 이용해 주제별로 주요 단어를 제시한다.)
+
+-   Highest probability: 각 주제별로 단어가 등장할 확률이 높은 정도. 베타() 값.
+
+-   FREX: 전반적인 단어빈도의 가중 평균. 해당 주제에 배타적으로 포함된 정도.
+
+-   Lift: 다른 주제에 덜 등장하는 정도. 해당 주제에 특정된 정도.
+
+-   score: 다른 주제에 등장하는 로그 빈도. 해당 주제에 특정된 정도.
+
+## 소통
+
+분석한 모형을 통해 말뭉치에 포함된 주제와 주제별 단어의 의미가 무엇인지 전달하기 위해서는 우선 모형에 대한 해석을 제시할 수 있는 시각화가 필요하다. 이를 위해서는 먼저 주요 계수의 의미를 이해할 필요가 있다. 주제모형에서 주제별 확률분포를 나타내는 베타와 감마다.
+
+-   베타 ββ: 단어가 각 주제에 등장할 확률. 각 단어별로 베타 값 부여. stm모형 요약에서 제시한 Highest probability의 지표다.
+
+-   감마 γγ: 문서가 각 주제에 등장할 확률. 각 문서별로 감마 값 부여.
+
+즉, 베타와 감마 계수를 이용해 시각화하면 주제와 주제단어의 의미를 간명하게 나타낼 수 있다.
+
+주제 수 6개로 조정해 다시 모형 구성 (편의를 위해)
+
+```{r}
+stm_fit <-
+  stm(
+    documents = docs,
+    vocab = vocab,
+    K = 10,    # 토픽의 수
+    data = meta,
+    init.type = "Spectral",
+    seed = 37, # 반복실행해도 같은 결과가 나오게 난수 고정
+    verbose = F
+  )
+
+summary(stm_fit) %>% glimpse()
+```
+
+```{r}
+summary(stm_fit)
+```
+
+베타값 이용해 주제별 단어 분포 막대도표 시각화
+
+```{r}
+td_beta <- stm_fit %>% tidy(matrix = 'beta') 
+
+td_beta %>% 
+  group_by(topic) %>% 
+  slice_max(beta, n = 7) %>% 
+  ungroup() %>% 
+  mutate(topic = str_c("주제", topic)) %>% 
+  
+  ggplot(aes(x = beta, 
+             y = reorder(term, beta),
+             fill = topic)) +
+  geom_col(show.legend = F) +
+  facet_wrap(~topic, scales = "free") +
+  labs(x = expression("단어 확률분포: "~beta), y = NULL,
+       title = "주제별 단어 확률 분포",
+       subtitle = "각 주제별로 다른 단어들로 군집") +
+  theme(plot.title = element_text(size = 20))
+```
+
+## 주제별 문서 분포
+
+감마 값을 이용해 주제별 문서 분포 히스토그램 시각화. x축과 y축에 각각 변수를 투입하는 막대도표와 달리, 히스토그램은 x축에만 변수를 투입하고, y축에는 x축 값을 구간(bin)별로 요약해 표시. 각 문서가 각 주제별로 등장할 확률인 감마(γγ)의 분포가 어떻게 히스토그램으로 표시되는지 살펴보기.
+
+```{r}
+td_gamma <- stm_fit %>% tidy(matrix = "gamma") 
+td_gamma %>% glimpse()
+
+```
+
+```{r}
+td_gamma %>% 
+  mutate(max = max(gamma),
+         min = min(gamma),
+         median = median(gamma))
+```
+
+```{r}
+td_gamma %>% 
+  ggplot(aes(x = gamma, fill = as.factor(topic))) +
+  geom_histogram(bins = 100, show.legend = F) +
+  facet_wrap(~topic) + 
+  labs(title = "주제별 문서 확률 분포",
+       y = "문서(기사)의 수", x = expression("문서 확률분포: "~(gamma))) +
+  theme(plot.title = element_text(size = 20))
+```
+
+## 주제별 단어-문서분포
+
+```{r}
+plot(stm_fit, type = "summary", n = 5)
+```
+
+## 주제별 상위 5개 단어 추출
+
+```{r}
+top_terms <- 
+td_beta %>% 
+  group_by(topic) %>% 
+  slice_max(beta, n = 5) %>% 
+  select(topic, term) %>% 
+  summarise(terms = str_flatten(term, collapse = ", ")) 
+```
+
+## 주제별 감마 평균 계산
+
+```{r}
+gamma_terms <- 
+td_gamma %>% 
+  group_by(topic) %>% 
+  summarise(gamma = mean(gamma)) %>% 
+  left_join(top_terms, by = 'topic') %>% 
+  mutate(topic = str_c("주제", topic),
+         topic = reorder(topic, gamma))
+```
+
+결합한 데이터 프레임을 막대도표에 표시한다.
+
+```{r}
+gamma_terms %>% 
+  
+  ggplot(aes(x = gamma, y = topic, fill = topic)) +
+  geom_col(show.legend = F) +
+  geom_text(aes(label = round(gamma, 2)), # 소수점 2자리 
+            hjust = 1.4) +                # 라벨을 막대도표 안쪽으로 이동
+  geom_text(aes(label = terms), 
+            hjust = -0.05) +              # 단어를 막대도표 바깥으로 이동
+  scale_x_continuous(expand = c(0, 0),    # x축 막대 위치를 Y축쪽으로 조정
+                     limit = c(0, 1)) +   # x축 범위 설정
+  labs(x = expression("문서 확률분포"~(gamma)), y = NULL,
+       title = "이대남 관련보도 상위 주제어",
+       subtitle = "주제별로 기여도가 높은 단어 중심") +
+  theme(plot.title = element_text(size = 20))
+```
+
+### (참고) 주제 이름 목록
+
+주제별 주요 단어 labelTopics() 함수로 주요 단어 찾기
+
+```{r}
+labelTopics(stm_fit)
+```
