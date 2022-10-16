@@ -1,0 +1,99 @@
+---
+title: "7w_mcq_pn"
+format: html
+editor: visual
+---
+
+```{r}
+### 한국어감정사전 불러오기 
+read_feather("dic_kor.feather") -> dic_kor_df
+```
+
+```{r}
+df2_senti_df <- df2 %>% 
+  unnest_tokens(word, 키워드) %>% 
+  inner_join(dic_kor_df) %>% 
+  group_by(press) %>% 
+  count(word, sScore, sort =T) %>% 
+  filter(str_length(word) >1) %>% 
+  mutate(word = reorder(word, n)) %>% 
+  slice_head(n = 20)
+```
+
+```{r}
+df2_senti_df %>% 
+  ggplot() + geom_col(aes(n, word, fill = sScore), show.legend = F) +
+  facet_wrap(~press, scales = "free")
+
+```
+
+```{r}
+## 감정점수 계산 
+
+df2 %>% 
+  unnest_tokens(word, 키워드) %>% 
+  left_join(dic_kor_df) %>% 
+  mutate(sScore = ifelse(is.na(sScore), 0, sScore)) %>% 
+  arrange(sScore)
+
+```
+
+```{r}
+
+
+df2 %>% 
+  unnest_tokens(word, 키워드) %>% 
+  left_join(dic_kor_df) %>% 
+  mutate(sScore = ifelse(sScore >= 1, "긍정",
+                         ifelse(sScore <= -1, "부정", "중립"))) %>% 
+  count(sScore)
+```
+
+```{r}
+# 감정 극성별 단어빈도 
+
+kor_pos_df <- dic_kor_df %>% 
+  filter(sScore > 0)
+kor_pos_df$sScore %>% unique()
+
+kor_neg_df <- dic_kor_df %>% 
+  filter(sScore < 0)
+kor_neg_df$sScore %>% unique()
+```
+
+```{r}
+df2 %>% 
+  unnest_tokens(word, 키워드) %>% 
+  inner_join(kor_pos_df) %>% 
+  count(press, word, sort = T)
+```
+
+```{r}
+df2 %>% 
+  unnest_tokens(word, 키워드) %>% 
+  inner_join(kor_neg_df) %>% 
+  count(press, word, sort = T)
+```
+
+```{r}
+library(wordcloud)
+
+df2 %>% 
+  unnest_tokens(word, 키워드) %>% 
+  count(word) %>% 
+  filter(str_length(word) > 1) %>% 
+  with(wordcloud(word, n, max.words = 50))
+
+```
+
+```{r}
+df2 %>% 
+  unnest_tokens(word, 키워드) %>% 
+  inner_join(dic_kor_df) %>% 
+  mutate(emotion = ifelse(sScore > 0, "긍정", ifelse(sScore < 0, "부정", "중립"))) %>% 
+  filter(emotion != "중립") %>% 
+  count(word, emotion, sort = T) %>% 
+  filter(str_length(word) > 1) %>% 
+  reshape2::acast(word ~ emotion, value.var = "n", fill = 0) %>% 
+  comparison.cloud(colors = c("blue", "red"), max.words = 50)
+```

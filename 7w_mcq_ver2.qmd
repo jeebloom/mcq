@@ -1,0 +1,621 @@
+---
+title: "7w_mcq_textmining"
+author: "AD202211602 이지화"
+date: "2022/10/18"
+format: html
+editor: visual
+---
+
+# 패키지 불러오기
+
+```{r}
+c(
+  "feather", "rio", "textdata", "text2vec",  # import data 
+  "tidyverse", "tidytable", "tidytext", "lubridate", # cleaning data
+  "psych", "skimr", "janitor", "broom", "tidylo", # data analysis
+  "gt", "GGally"  # communicate data
+) -> pkg
+
+sapply(pkg, function(x) {
+  if(!require(x, ch = T)) install.packages(x, dependencies = T) 
+  library(x, ch = T)
+})
+
+```
+
+# 맥북 호환 설정
+
+```{r}
+# (mac os 에서만 실행) ggplot 한글 호환
+par(family="NanumGothic")
+theme_set(theme_gray(base_family= "NanumGothic"))
+
+# (mac os 에서만 실행) 상관관계 그래프 한글 호환 
+library(showtext)
+font_add("NanumGothic", "NanumGothic.ttf")
+showtext_auto()
+theme(text = element_text(family = "NanumGothic"))
+
+```
+
+# 분석 준비
+
+## 자료 준비
+
+```{r}
+
+import("news_20210908_20220907.xlsx") -> df
+```
+
+```{r}
+df %>% names()
+
+df %>% select(일자, 언론사, 제목, 본문, cat = `통합 분류1`, 키워드) -> df
+
+df %>% glimpse()
+
+```
+
+일자 월에 대한 값으로 변경하기
+
+```{r}
+library(lubridate)
+```
+
+```{r}
+as_date("20201231") %>% month()
+ymd("20201231") %>% month()
+```
+
+```{r}
+df2 <- 
+  df %>% 
+  # 중복기사 제거
+  distinct(제목, .keep_all = T) %>% 
+  # 기사별 ID부여
+  mutate(ID = factor(row_number())) %>% 
+  # 월별로 구분한 열 추가(lubridate 패키지)
+  mutate(month = month(ymd(일자))) %>%       
+  # 기사 제목과 본문 결합
+  unite(제목, 본문, col = "text", sep = " ") %>% 
+  # 중복 공백 제거
+  mutate(text = str_squish(text)) %>% 
+  # 언론사 구분: 보수, 진보 %>% 
+  mutate(press = case_when(
+    언론사 == "조선일보" ~ "보수지",
+    언론사 == "중앙일보" ~ "보수지",
+    언론사 == "동아일보" ~ "보수지",
+    언론사 == "경향신문" ~ "진보지",
+    TRUE ~ "진보지") ) %>% 
+  # 기사 분류 구분 
+  separate(cat, sep = ">", into = c("cat", "cat2")) %>% 
+  # IT_과학, 경제, 사회 만 선택
+  select(-cat2) %>% 
+  # 분류 구분: 사회, 비사회
+  mutate(catSoc = case_when(
+    cat == "정치" ~ "정치면",
+    TRUE ~ "비정치면") )
+```
+
+```{r}
+df2 %>% tail(10)
+```
+
+```{r}
+df2 %>% names()
+```
+
+기사 분류된 월 등 새로 생성한 열의 내용 확인해보기
+
+```{r}
+df2$catSoc %>% unique()
+df2$month %>% unique()
+```
+
+분류별, 월별 기사 양 계산
+
+```{r}
+df2 %>% count(catSoc, sort =T)
+```
+
+```{r}
+df2 %>% count(press, sort =T)
+```
+
+```{r}
+df2 %>% count(언론사, sort = T)
+```
+
+토큰화, 불용어 제거 등
+
+```{r}
+"!@#$... 전각ㆍㅣ문자 %^&*()" %>% str_remove("\\w+")
+
+fullchar_v <- "ㆍ|ㅣ|‘|’|“|”|○|●|◎|◇|◆|□|■|△|▲|▽|▼|〓|◁|◀|▷|▶|♤|♠|♡|♥|♧|♣|⊙|◈|▣"
+
+df_tk <- 
+  df2 %>% 
+  mutate(키워드 = str_remove_all(키워드, "[^(\\w+|\\d+|,)]")) %>% 
+  mutate(키워드 = str_remove_all(키워드, fullchar_v)) %>% 
+  unnest_tokens(word, 키워드, token = "regex", pattern = ",") 
+```
+
+단어의 총 빈도와 상대빈도 살펴보기
+
+```{r}
+df_tk %>% count(word, sort = T) -> count_df
+```
+
+```{r}
+count_df %>% head(60)
+```
+
+상대빈도가 높은 단어와 낮은 단어 확인
+
+```{r}
+df_tk %>% count(press, word, sort = T) %>% 
+  bind_log_odds(set = press, feature = word, n = n) %>% 
+  arrange(log_odds_weighted)
+```
+
+```{r}
+df_tk %>% count(press, word, sort = T) %>% 
+  bind_tf_idf(term = word, document = word, n = n) %>% 
+  arrange(idf)
+```
+
+```{r}
+
+library(stm)
+```
+
+stm 패키지 형식의 말뭉치로 변환하기, 분리된 토큰을 원래 문장 에 속한 하나의 열로 저장하기
+
+```{r}
+combined_df <-
+  df_tk %>%
+  group_by(ID) %>%
+  summarise(text2 = str_flatten(word, " ")) %>%
+  ungroup() %>% 
+  inner_join(df2, by = "ID")
+```
+
+```{r}
+combined_df %>% glimpse()
+```
+
+textProcessort() 함수로 리스트 형식의 stm 말뭉치 변환하기
+
+```{r}
+processed <- 
+  combined_df %>% textProcessor(
+    documents = combined_df$text2, 
+    metadata = .,
+    wordLengths = c(2, Inf)
+    )
+```
+
+```{r}
+summary(processed)
+```
+
+주제모형에 사용할 데이터 인덱스(wordcounts) 만들기
+
+```{r}
+out <- 
+  prepDocuments(processed$documents,
+                     processed$vocab,
+                     processed$meta,
+                lower.thresh = 0)
+
+summary(out)
+```
+
+산출 결과 개별 객체로 저장하기
+
+```{r}
+docs <- out$documents
+vocab <- out$vocab
+meta <- out$meta
+
+```
+
+# 분석
+
+## 주제의 수 (K) 설정 (연습)
+
+-   주제를 몇개로 설정할지 탐색, searchk() 함수는 주제의 수에 따라 4가지 계수 제공함
+
+    -   배타성(exclusivity): 특정 주제에 등장한 단어가 다른 주제에는 나오지 않는 정도. 확산타당도에 해당.
+
+    -   의미 일관성(semantic coherence): 특정 주제에 높은 확률로 나타나는 단어가 동시에 등장하는 정도. 수렴타당도에 해당.
+
+    -   지속성(heldout likelihood): 데이터 일부가 존재하지 않을 때의 모형 예측 지속 정도.
+
+    -   잔차(residual): 투입한 데이터로 모형을 설명하지 못하는 오차.
+
+    -   *배타성, 의미 일관성, 지속성이 높을 수록, 그리고 잔차가 작을수록 모형의 적절성 증가.*
+
+```{r}
+# topicN <- seq(from = 10, to = 100, by = 10)
+topicN <- c(4, 5, 6, 8)
+
+storage <- searchK(out$documents, out$vocab, K = topicN)
+```
+
+```{r}
+plot(storage) # 배타성, 지속성, 잔차 등 3개 지표에서 모두 주제의 수가 5개인 모형이 우수하여 5로 지정하기로함. 
+```
+
+## 주제모형 구성
+
+```{r}
+t1 <- Sys.time()
+meta_fit <-
+  stm(
+    documents = docs,
+    vocab = vocab,
+    data = meta,
+    K =4,         
+    prevalence =~ press, # 투입하는 공변인
+    max.em.its = 75,                # 최대 반복계산 회수 
+    verbose = F,                    # 반복계산결과 화면출력 여부
+    init.type = "Spectral",
+    seed = 37 
+  )
+
+
+t2 <- Sys.time()
+t2-t1
+```
+
+```{r}
+summary(meta_fit)
+```
+
+결합하는 두 데이터프레임의 기준이 되는 열에 포함된 자료의 유형을 통일시킨다. 여기서는 정수(integer)로 통일시켰다.
+
+```{r}
+td_gamma <- meta_fit %>% tidy(matrix = "gamma")
+td_gamma$document <- as.integer(td_gamma$document)
+combined_df$ID <- as.integer(combined_df$ID) 
+```
+
+각 주제는 독립된 열로 분리한다.
+
+```{r}
+text_gamma <- 
+combined_df %>% 
+  select(ID, text2, text, 키워드) %>% 
+  left_join(td_gamma, by = c("ID" = "document")) %>% 
+  pivot_wider(
+    names_from = topic,
+    values_from = gamma,
+    names_prefix = "tGamma",
+    values_fill = 0
+    ) 
+
+text_gamma %>% glimpse()  
+```
+
+각 주제별로 확률분포가 높은 문서 확인. 각 문서에서 감마가 높은 순서로 정렬, 해당 주제에 속할 확률이 높은 문서 순서대로 볼 수 있음. pull() 함수를 이용하면 해당 열의 모든 내용을 볼 수 있다.
+
+```{r}
+text_gamma %>% 
+  arrange(-tGamma3) %>% 
+  pull(text) %>% head(10)
+
+text_gamma %>% 
+  arrange(-tGamma3) %>% 
+  pull(키워드) %>% .[1]
+```
+
+각 주제별로 대표 단어 선택해 원문 살펴보기
+
+```{r}
+text_gamma %>% 
+  arrange(-tGamma2) %>% 
+  filter(str_detect(text, "대선")) %>% 
+  mutate(text = str_replace_all(text, "대선", "**대선**")) %>% 
+  pull(text) %>% 
+  head(5)
+```
+
+## 주제 이름 목록
+
+각 주제별로 주요 주제어와 해당 문서의 본문을 비교해 주제별로 주요 문서를 살펴보고 주제에 대한 이름을 짓는다. 각 주제별 주요 단어는 `labelTopics()`함수를 통해 주요단어를 찾을 수 있다. 주제별 이름은 목록을 만들어 데이터프레임에 저장한다.
+
+```{r}
+labelTopics(meta_fit)
+```
+
+주제별 이름 목록 데이터 프레임에 저장
+
+```{r}
+topic_name <- tibble(topic = 1:4,
+                     name = c("1. 젠더 차별",
+                              "2. 대통령 선거 관련",
+                              "3. 정부정책",
+                              "4. 사건사고 등 범죄"))
+```
+
+주제별 상위 10개 단어목록 데이터프레임에 저장 후, 이름 목록과 결합
+
+```{r}
+td_beta <- meta_fit %>% tidy(matrix = 'beta') 
+
+term_topic_name <- 
+td_beta %>% 
+  group_by(topic) %>% 
+  slice_max(beta, n = 8) %>% 
+  left_join(topic_name, by = "topic")
+
+term_topic_name
+```
+
+## 주제별 단어 분포도
+
+단어별 부여된 베타 값 이용해 주제별 단어 분포도를 각 주제의 이름과 함께 시각화
+
+```{r}
+term_topic_name %>% 
+  
+  ggplot(aes(x = beta, 
+             y = reorder_within(term, beta, name),  # 각 주제별로 재정렬
+             fill = name)) +
+  geom_col(show.legend = F) +
+  facet_wrap(~name, scales = "free") +
+  scale_y_reordered() +                             # 재정렬한 y축의 값 설정
+  labs(x = expression("단어 확률분포: "~beta), y = NULL,
+       title = "주제별 단어 확률 분포",
+       subtitle = "주제별로 다른 단어들로 군집") +
+  theme(plot.title = element_text(size = 20))
+```
+
+## 주제별 문서 분포도
+
+```{r}
+td_gamma <- meta_fit %>% tidy(matrix = 'gamma') 
+
+doc_topic_name <- 
+td_gamma %>% 
+  group_by(topic) %>% 
+  left_join(topic_name, by = "topic")
+
+doc_topic_name
+```
+
+```{r}
+doc_topic_name %>% 
+  ggplot(aes(x = gamma, fill = name)) +
+  geom_histogram(bins = 50, show.legend = F) +
+  facet_wrap(~name) + 
+  labs(title = "주제별 문서 확률 분포",
+       y = "문서(기사)의 수", x = expression("문서 확률분포"~(gamma))) +
+  theme(plot.title = element_text(size = 20))
+```
+
+## 주제별 단어-문서 분포
+
+```{r}
+# 주제별 상위 8개 단어 추출
+top_terms <- 
+td_beta %>% 
+  group_by(topic) %>% 
+  slice_max(beta, n = 8) %>% 
+  select(topic, term) %>% 
+  summarise(terms = str_flatten(term, collapse = ", ")) 
+
+top_terms
+```
+
+```{r}
+# 주제별 감마 평균 계산  
+gamma_terms <- 
+td_gamma %>% 
+  group_by(topic) %>% 
+  summarise(gamma = mean(gamma)) %>% 
+  left_join(top_terms, by = 'topic') %>%  # 주제별 단어 데이터프레임과 결합
+  left_join(topic_name, by = 'topic')     # 주제 이름 데이터프레임과 결합
+```
+
+```{r}
+gamma_terms
+```
+
+결합한 데이터프레임을 막대도표로 시각화
+
+```{r}
+gamma_terms %>% 
+  
+  ggplot(aes(x = gamma, y = reorder(name, gamma), fill = name)) +
+  geom_col(show.legend = F) +
+  geom_text(aes(label = round(gamma, 2)), # 소수점 2자리 
+            hjust = 1.15) +                # 라벨을 막대도표 안쪽으로 이동
+  geom_text(aes(label = terms), 
+            hjust = -0.05) +              # 단어를 막대도표 바깥으로 이동
+  scale_x_continuous(expand = c(0, 0),    # x축 막대 위치를 Y축쪽으로 조정
+                     limit = c(0, .8)) +   # x축 범위 설정
+  labs(x = expression("문서 확률분포"~(gamma)), y = NULL,
+       title = "젠더 보도 상위 주제어",
+       subtitle = "주제별로 기여도가 높은 단어 중심") +
+  theme(plot.title = element_text(size = 20))
+```
+
+## 공변인 분석
+
+회귀계수는 독립변수가 종속변수를 설명하는 정도다. 예를 들어, press(언론사 정치성향)가 각 주제를 예측하는 정도가 회귀계수이므로, 이 회귀계수가 보수지에 비해 진보지에서 해당 주제에 대해 평균적으로 더 많이 언급한 정도를 나타낸다. 회귀계수가 음수면 보수지에서 언급이 더 많은 주제이고, 양수면 진보지에서 언급이 더 많은 주제다. t값과 p값은 그 효과(회귀계수)가 0과 유의하게 다른지를 나타낸다.
+
+```{r}
+out$meta$rating <- as.factor(out$meta$press)
+prep <- estimateEffect(formula = 1:4 ~ press + s(month, 5),
+                       stmobj = meta_fit,
+                       metadata = out$meta,
+                       uncertainty = "Global")
+
+summary(prep, topics= 1:4)
+```
+
+## 문서 내용 확인
+
+주제1.은 젠더 갈등에 관련된 내용. 언론사 별로 각 주제에 대해 전형적 기사가 무엇인지 확인. 원문과 언론사 정보가 포함된 데이터프레임과 감마 계수 데이터프레임을 결합헤 기사 찾을 수 있음
+
+```{r}
+combined_df %>% names()
+```
+
+```{r}
+combined_df %>% 
+  left_join(td_gamma, by = c("ID" = "document")) %>% 
+  pivot_wider(
+    names_from = topic,
+    values_from = gamma,
+    names_prefix = "tGamma",
+    values_fill = 0
+    ) %>% 
+
+  arrange(-tGamma1) %>% 
+  filter(str_detect(text, "젠더")) %>% 
+  mutate(text = str_replace_all(text, "젠더", "**젠더**")) %>% 
+  head(30)
+```
+
+## 공변인 분석 시각화
+
+### 정치성향에 따른 주제분포
+
+```{r}
+plot.estimateEffect(
+  prep,
+  covariate = "press",
+  topics = c(1, 2, 3, 4),
+  model = meta_fit,
+  method = "difference",
+  cov.value1 = "보수지",
+  cov.value2 = "진보지",
+  xlab = "문서당 주제 분포 비율(보수지 대 진보지)",
+  main = "언론사 정치성향에 따른 문서별 주제 분포",
+  xlim = c(-.1, .1),
+  labeltype = "custom",
+  custom.labels = c("주제1", "주제2", "주제3", "주제4")
+)
+```
+
+```{r}
+# 주제 이름 
+topic_name
+```
+
+```{r}
+# 공변인 계수
+
+coef_df <-
+  prep %>% tidy() %>% 
+  filter(term == "press진보지")
+
+coef_df
+```
+
+```{r}
+# 주제별 상위 10개 단어 추출
+top_terms <- 
+meta_fit %>% tidy(matrix = "beta")  %>% 
+  group_by(topic) %>% 
+  slice_max(beta, n = 10) %>% 
+  select(topic, term) %>% 
+  summarise(terms = str_flatten(term, " "))
+```
+
+```{r}
+top_terms
+```
+
+```{r}
+# 데이터프레임 결합
+term_coef_name <- 
+top_terms %>% 
+  left_join(topic_name, by = "topic") %>% 
+  left_join(coef_df, by = "topic") 
+  
+term_coef_name %>% glimpse()
+```
+
+```{r}
+term_coef_name %>% 
+  
+  ggplot(aes(x = estimate,
+             y = reorder(name, estimate),
+             fill = name)) +
+  geom_col(show.legend = F) +
+  geom_errorbar(aes(xmin = estimate - std.error,
+                    xmax = estimate + std.error), 
+                width = .9, size = .4, color = "grey10",
+                show.legend = F) +
+  scale_x_continuous(expand = c(0, 0),
+                     limits = c(-.75, .15),
+                     breaks = 0) +
+  geom_text(aes(x =-.4, label = terms), show.legend = F) +
+  geom_text(aes(label = round(estimate, 3)),
+            hjust = -.2) +
+  
+  labs(x = "문서당 주제 분포 비율(보수지 대 진보지)",
+       y = NULL,
+       title = "언론사 정치성향에 따른 문서별 주제 분포") +
+  theme(plot.title = element_text(size = 20))
+```
+
+### 시간대별 주제 변화
+
+```{r}
+plot.estimateEffect(
+  prep,
+  covariate = "month",    
+  topics = c(1, 2, 3, 4),
+  model = meta_fit,
+  method = "continuous", # 시간대 연속적으로 표시
+  xlab = "기간(2021. 9. 8 ~ 2022. 9. 7)",
+  main = "시간대별 주제 분포"
+)
+```
+
+```{r}
+# 공변인 계수
+
+coef_time <- 
+prep %>% tidy() %>% 
+  filter(str_detect(term, "^s"))
+coef_time
+```
+
+```{r}
+# 데이터프레임 결합
+term_coef_time <- 
+coef_time %>% 
+  left_join(topic_name, by = "topic") 
+  
+term_coef_time %>% glimpse()
+```
+
+```{r}
+term_coef_time %>% 
+  mutate(term = str_extract(term, "\\d$")) %>% 
+  mutate(term = as.integer(term)) %>% 
+  mutate(term = term * 2 - 1) %>% 
+  mutate(term = as.factor(term)) %>% 
+           
+  filter(str_detect(name, "^1|^2|^3|^4")) %>% 
+  
+  ggplot(aes(x = term,
+             y = estimate,
+             color = name)) +
+  geom_line(aes(group = name), size = 1.2) +
+  geom_point(aes(shape = name), size = 3,) +
+  geom_errorbar(aes(ymin = estimate - std.error, 
+                    ymax = estimate + std.error), 
+                width = .4, size = 1,
+                position = position_dodge(.01)) +
+  labs(x = "기간(2021. 9. 8 ~ 2022. 9. 7)",
+       y = "문서당 주제 분포 비율",
+       title = "시간대별 주제 분포") +
+  theme(plot.title = element_text(size = 15))
+```
