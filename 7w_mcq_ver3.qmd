@@ -1,0 +1,215 @@
+---
+title: "7w_mcq_ver3"
+format: html
+editor: visual
+---
+
+```{r}
+library(tidyverse)
+```
+
+# 토큰화하기
+
+```{r}
+cv_feature <- df2 %>% 
+  select(키워드, press) %>% 
+  rowid_to_column() %>% 
+  unnest_tokens(input = 키워드,
+                output = word,
+                token = "regex",
+                pattern = ",")
+
+cv_feature
+```
+
+# 단어 동시 출현 빈도 구하기 
+
+```{r}
+library(widyr)
+```
+
+```{r}
+pair <- cv_feature %>% 
+  pairwise_count(item = word,
+                 feature = rowid,
+                 sort =T)
+```
+
+```{r}
+pair
+```
+
+# 특정 단어와 함께 사용된 단어 살펴보기
+
+```{r}
+pair  %>% filter(item1 == "대선")
+```
+
+```{r}
+pair %>% filter(item1 == "윤석열")
+```
+
+-   오류, 유의어 수정 처리 하기
+
+# 네트워크 그래프 데이터 만들기
+
+```{r}
+library(tidygraph)
+```
+
+```{r}
+graph_pair <- pair %>% 
+  filter(n >= 300) %>% 
+  as_tbl_graph()
+
+graph_pair
+```
+
+# 네트워크 그래프 만들기
+
+```{r}
+library(ggraph)
+library(showtext)
+```
+
+```{r}
+font_add_google(name = "Nanum Gothic",
+                family = "nanumgothic")
+showtext_auto()
+
+set.seed(220907) # 오늘 날짜와 같은 임의의 숫자 조합으로 난수 고정
+ggraph(graph_pair, layout = "fr") + # 레이아웃
+  geom_edge_link(color = "gray50",          # 엣지 색깔
+                 alpha = 0.5) +             # 엣지 명암
+
+  geom_node_point(color = "lightcoral",     # 노드 색깔
+                  size = 2) +               # 노드 크기
+
+  geom_node_text(aes(label = name),         # 텍스트 표시
+                 repel = T,                 # 노드밖 표시
+                 size = 2,                  # 텍스트 크기
+                 family = "nanumgothic") +  # 폰트
+
+  theme_graph()         # 배경 삭제
+```
+
+# 연결 중심성과 커뮤니티 표현하기
+
+```{r}
+set.seed(210531)
+graph_pair <- pair %>%
+  filter(n >= 300) %>%
+  as_tbl_graph(directed = F) %>%
+  mutate(centrality = centrality_degree(),        # 연결 중심성
+         group = as.factor(group_louvain()))      # 커뮤니티
+graph_pair
+```
+
+```{r}
+set.seed(27)
+ggraph(graph_pair, layout = "fr") +      # 레이아웃
+  
+  geom_edge_link(color = "gray50",          # 엣지 색깔
+                 alpha = 0.5) +             # 엣지 명암
+  
+  geom_node_point(aes(size = centrality,    # 노드 크기
+                      color = group),       # 노드 색깔
+                  show.legend = F) +        # 범례 삭제
+  scale_size(range = c(5, 7)) +            # 노드 크기 범위
+  
+  geom_node_text(aes(label = name),         # 텍스트 표시
+                 repel = T,                 # 노드밖 표시
+                 size = 2,                  # 텍스트 크기
+                 family = "nanumgothic") +  # 폰트
+  
+  theme_graph()                             # 배경 삭제
+```
+
+# 단어간 상관분석
+
+```{r}
+feature_cors <- cv_feature %>%
+  add_count(word) %>% 
+  filter(n >= 100) %>% # 절대적 기준치 없음
+  pairwise_cor(item = word,
+               feature = rowid,
+               sort = T)
+pair
+```
+
+```{r}
+feature_cors
+```
+
+## 특정 단어와 관련성이 큰 단어 살펴보기
+
+```{r}
+pair %>% filter(item1 == "이대남")
+```
+
+```{r}
+feature_cors %>% 
+  filter(item1 == "이대남")
+```
+
+# 파이 계수로 막대 그래프 만들기
+
+```{r}
+target <- c("대선", "젠더", "이대남")
+
+top_cors <- feature_cors %>%
+  filter(item1 %in% target) %>%
+  group_by(item1) %>%
+  slice_max(correlation, n = 10)
+top_cors
+```
+
+```{r}
+top_cors$item1 <- factor(top_cors$item1, levels = target)
+
+library(ggplot2)
+ggplot(top_cors, aes(x = reorder_within(item2, correlation, item1),
+                 y = correlation,
+                 fill = item1)) +
+  geom_col(show.legend = F) +
+  facet_wrap(~ item1, scales = "free") +
+  coord_flip() +
+  scale_x_reordered() +
+  labs(x = NULL) +
+  theme_minimal()
+```
+
+# 파이 계수로 네트워크 그래프 만들기
+
+```{r}
+set.seed(210531)
+graph_cors <- feature_cors %>%
+  filter(correlation >= 0.35) %>% # 절대적 기준치 없음
+  as_tbl_graph(directed = F) %>%
+  mutate(centrality = centrality_degree(),
+         group = as.factor(group_louvain()))
+graph_cors
+```
+
+```{r}
+set.seed(210531)
+ggraph(graph_cors, layout = "fr") +
+
+  geom_edge_link(color = "gray50",
+                 aes(edge_alpha = correlation,   # 엣지 명암
+                     edge_width = correlation),  # 엣지 두께
+                 show.legend = F) +              # 범례 삭제
+  scale_edge_width(range = c(0.5, 2)) +            # 엣지 두께 범위
+  
+  geom_node_point(aes(size = centrality,
+                      color = group),
+                  show.legend = F) +
+  scale_size(range = c(2, 7)) +
+
+  geom_node_text(aes(label = name),
+                 repel = T,
+                 size = 2,
+                 family = "nanumgothic") +
+
+  theme_graph()
+```
